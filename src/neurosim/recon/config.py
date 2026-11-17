@@ -91,7 +91,7 @@ class CalibrationConfig:
         gt=0.0,
         doc="Upper limit of the gamma shape assumed in the delay updates. The denoised image "
         "the delays are fitted to is itself uncertain, which the likelihood of the "
-        "time-averaged image (shape effective_frames * n_trials, thousands) ignores; a low "
+        "time-averaged image (per-pixel shape times n_trials, tens to hundreds) ignores; a low "
         "shape stands in for that uncertainty and lets the Gaussian prior hold the delays. "
         "Tuning choice: on seven synthetic scenes the ratio of calibrated to starting delay "
         "error had median 0.90 and maximum 4.1 without a limit and median 0.91 and maximum "

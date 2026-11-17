@@ -3,7 +3,7 @@
 `build_scene` chains the finished packages (docs/ARCHITECTURE.md, section 7):
 
     head -> imaging plane -> fine plane medium -> skull-effect switches / skull removed
-         -> Green's banks (true skull, no skull) -> CT prior medium -> its ray bank
+         -> Green's banks (true skull, no skull) -> CT prior medium -> its model bank
          -> beamformer per key of `data.types.BEAMFORMERS` -> power Doppler operator,
             noise floor and independent-frame counts per key -> phase screens.
 
@@ -11,11 +11,12 @@ Beamformer keys and their banks (`beamformer_banks`): the channel data of
 `skull_das`, `skull_ct` and `skull_true` come from the true-skull bank and those
 of `clean_das` from the no-skull bank. The model the beamformer assumes is the
 homogeneous bank for `skull_das` and `clean_das` (conventional delay-and-sum at
-C_REF), the CT-derived ray bank for `skull_ct`, and a *ray* bank through the true
-medium for `skull_true`. With the `kwave` backend the data then contain
-refraction and reverberation that this model ignores: the "true-skull
+C_REF), the CT-derived model bank for `skull_ct`, and a model bank through the
+true medium for `skull_true` (`_model_backend`: the data's own backend for `ray`
+and `bent_ray`, `bent_ray` for `kwave`). With the `kwave` backend the data then
+contain reverberation and later arrivals that the model ignores: the "true-skull
 correction" baseline stays a ray-model correction, as cheap as the CT one, and
-is not the exact inverse of the simulated skull. With the `ray` backend the
+is not the exact inverse of the simulated skull. With `ray` or `bent_ray` the
 model equals the bank that made the data.
 
 Normalisation (`fus.config`, `fus.noise`): the expected power Doppler image of
@@ -94,8 +95,8 @@ class SceneExtras:
         medium: the true plane medium on the fine grid, skull-effect switches applied
             (the medium `Scene.bank_skull` was computed for).
         medium_ct: the CT-derived plane medium on the same grid.
-        model_true: ray bank through `medium`, the model of the `skull_true`
-            beamformer (`Scene.bank_skull` itself unless the backend is `kwave`).
+        model_true: model bank through `medium` (`_model_backend`), the model of the
+            `skull_true` beamformer (`Scene.bank_skull` itself unless the backend is `kwave`).
         blood_velocity: in-plane blood velocity on the scene's pixel grid [m/s],
             float32, shape (2, nz, nx), components (vx, vz).
     """
@@ -230,9 +231,15 @@ def speckle_frame_counts(
     return {key: count.blood for key, count in counts.items()}, noise_frames
 
 
-def _ray_backend(cfg: RunConfig) -> BackendConfig:
-    """The ray backend with the run's ray settings: CT-derived bank and true-skull model."""
-    return BackendConfig(backend="ray", ray=cfg.backend.ray)
+def _model_backend(cfg: RunConfig) -> BackendConfig:
+    """Backend of the correction models: the CT-derived bank and the true-skull model.
+
+    A correction model must be cheap, so it is never the full-wave solver: with the
+    `kwave` backend the models use `bent_ray` (the most faithful ray tier); with `ray`
+    or `bent_ray` they use the same backend as the data.
+    """
+    name = "bent_ray" if cfg.backend.backend == "kwave" else cfg.backend.backend
+    return dataclasses.replace(cfg.backend, backend=name)
 
 
 def _grid_summary(grid: Grid2D) -> dict[str, Any]:
@@ -268,9 +275,9 @@ def build_scene_with_extras(cfg: RunConfig, tree: SeedTree) -> tuple[Scene, Scen
     bank_arguments = (setup.transducer, setup.roi, setup.freqs)
     bank_skull = compute_bank(medium, *bank_arguments, cfg.backend)
     bank_clean = compute_bank(remove_skull(truth), *bank_arguments, cfg.backend)
-    bank_ct = compute_bank(medium_ct, *bank_arguments, _ray_backend(cfg))
+    bank_ct = compute_bank(medium_ct, *bank_arguments, _model_backend(cfg))
     if cfg.backend.backend == "kwave":
-        model_true = compute_bank(medium, *bank_arguments, _ray_backend(cfg))
+        model_true = compute_bank(medium, *bank_arguments, _model_backend(cfg))
     else:
         model_true = bank_skull
 
@@ -425,7 +432,7 @@ def estimate_cost(cfg: RunConfig) -> dict[str, Any]:
         cfg.head.grid.spacing, cfg.ct, cfg.ct_prior, (x[0], x[-1]), (z[0], z[-1])
     )
     bank = estimate_bank_cost(*bank_arguments, cfg.backend)
-    bank_ray = estimate_bank_cost(*bank_arguments, _ray_backend(cfg))
+    bank_ray = estimate_bank_cost(*bank_arguments, _model_backend(cfg))
     operator = estimate_acquisition_cost(
         dataclasses.replace(cfg.imaging, fidelity="statistical"), n_pix
     )

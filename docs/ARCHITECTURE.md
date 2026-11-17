@@ -121,7 +121,8 @@ Backends behind one interface `compute_bank(medium, transducer, roi, freqs, cfg)
 | Backend | Physics | Cost | Use |
 |---|---|---|---|
 | `analytic` | Homogeneous medium, `B = 1` | none | water evals, upper bound |
-| `ray` | Straight rays through the medium: travel-time and absorption integrals, interface transmission loss. No refraction, no reverberation | seconds | development, large sweeps, CT-derived correction |
+| `ray` | Straight rays through the medium: travel-time and absorption integrals, interface transmission loss. No refraction, no reverberation. Outside its validity beyond about 9 mm off axis at 2 MHz (E-FUS-021) | seconds | tests and small evals |
+| `bent_ray` | Refracted first-arrival rays: eikonal travel times, absorption along the bent path, angle-dependent interface transmission, no energy beyond grazing. No reverberation, no later arrivals | tens of seconds | **production data and correction models** (D-021) |
 | `kwave` | Full wave (k-wave-python, pure-Python k-space backend): aberration, absorption, refraction, reverberation | one simulation per element | reference tier |
 
 Nothing outside `fus/backends/` imports a solver.
@@ -149,10 +150,11 @@ Two fidelities produce data, chosen in the config:
 
 - `scatterer`: explicit moving blood scatterers and tissue scatterers, frame by
   frame, plus static skull clutter and electronic noise. Physically explicit; slow.
-- `statistical`: `PD = H @ cbv` with gamma speckle (shape set by the ensemble
-  length) and a noise floor. Fast. Its *mean* is validated against `scatterer`
-  (E-FUS-014, E-DATA-009); its speckle *variance* is checked by E-FUS-022 and is
-  a known weak point (ROADMAP D-018).
+- `statistical`: `PD = H @ cbv` plus a noise floor, with speckle whose variance
+  follows from blood motion: `fus.speckle` gives each pixel a number of
+  independent blood frames from the local velocity, the resolution cell and the
+  ensemble duration (D-022). Fast. Its mean is validated against `scatterer` by
+  E-FUS-014 and E-DATA-009, its variance by E-FUS-022.
 
 ## 6. `ct`
 
@@ -177,7 +179,9 @@ skull is the prior used by `recon`.
 - `data.pipeline.run(cfg, root_seed) -> (Scene, TrialSet)`: head -> plane ->
   banks (skull and no-skull) -> CT -> CT-derived skull -> operators -> trials.
   One config, one seed, one bundle on disk (`data.io.save_run`). `Scene` and
-  `TrialSet` (`data/types.py`) are the contract `recon` consumes.
+  `TrialSet` (`data/types.py`) are the contract `recon` consumes; a `Scene`
+  carries, per beamformer, the operator, the noise floor and the per-pixel
+  independent-frame counts (`effective_frames`, `noise_frames`).
 - `data.sweep`: grids or random sweeps over skull seed, frequency, probe pose,
   target region and noise switches; writes the paired dataset.
 - `recon`: baselines (uncorrected DAS, CT-corrected DAS, true-skull DAS, no

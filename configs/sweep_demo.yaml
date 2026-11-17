@@ -37,15 +37,15 @@ base:
       electronic_snr_db: 20.0
     fidelity: statistical
   backend:
-    backend: ray
+    backend: bent_ray
   ct_prior:
     slab_half_slices: 0            # only the central slice enters the plane's medium
   medium_spacing: 1.0e-4           # m
   source_refinement: 2             # 0.5 mm sub-cells; one sample per 1 mm pixel overstates the
                                    # clean blood signal 2.2 times, 2 x 2 is within 1 % of 4 x 4
   trials:
-    n_images: 40
-    image_interval: 3.0            # s: 0 to 117 s, three 20 s task blocks and the rests between
+    n_images: 120
+    image_interval: 1.0            # s: 0 to 119 s, three 20 s task blocks and the rests between
     amplitude_jitter: 0.2          # block-to-block response variation
 n_scenes: 8
 probe_shift_jitter: 3.0e-3       # m

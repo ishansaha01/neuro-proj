@@ -234,7 +234,8 @@ def _pooled_relative_variance(mean: np.ndarray, frames: np.ndarray) -> float:
         "for blood moving at the head model's default speeds (1 and 20 mm/s) the relative "
         "variance of a scatterer-tier power Doppler pixel over independent blood realisations "
         "equals the 1 / effective_frames of the statistical tier's gamma speckle, with "
-        "effective_frames = n_frames as the default configuration assigns"
+        "effective_frames as the default configuration assigns (n_frames when this eval was "
+        "written and failed; derived from blood motion by fus.speckle since ROADMAP D-022)"
     ),
     reference=(
         "The scatterer tier (explicit blood scatterers moving frame by frame, blood only): "
@@ -243,19 +244,20 @@ def _pooled_relative_variance(mean: np.ndarray, frames: np.ndarray) -> float:
         "= 1/k (mean of k independent speckle intensities, Goodman, Statistical Optics, 1985)"
     ),
     metric=(
-        "max_ratio: largest over the two speeds of (scatterer-tier relative variance) / "
+        "max_ratio: largest over the cases of (scatterer-tier relative variance) / "
         "(1 / effective_frames); relative variance = variance over draws / mean^2, pooled over "
         "the pixels of the blood region. max_ratio_density_corrected: the same after "
         "subtracting the largest possible finite-scatterer-density term from the measured value"
     ),
     threshold=(
-        "for both speeds, ratio >= 0.5 and density-corrected ratio <= 2 (fixed in advance: a "
+        "for every case, ratio >= 0.5 and density-corrected ratio <= 2 (fixed in advance: a "
         "factor 2 in variance is a factor 1.4 in the speckle standard deviation, the accuracy "
         "a noise model needs before a likelihood or an uncertainty built on it means much; the "
         "measurement has a standard error of about 25 % (5 draws x about 30 speckle cells), a "
         "quarter of the way from 1 to the upper bar; the reference's finite scatterer density "
         "adds at most 1 / (scatterers per PSF area), about 0.03, to the measured value, more "
-        "than the assumed 1/100, so the upper bar is applied after subtracting that bound)"
+        "than the 1/100 assumed when this bar was written, so the upper bar is applied after "
+        "subtracting that bound)"
     ),
     seeds=(0,),
 )

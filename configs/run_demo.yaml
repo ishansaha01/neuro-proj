@@ -4,7 +4,7 @@
 #   python scripts/run_pipeline.py --config configs/run_demo.yaml --seed 0 --out outputs/demo/run.h5 --save-media
 #   python scripts/plot_run.py --run outputs/demo/run.h5 --out outputs/demo/run.png
 # The ROADMAP array (128 elements at 2 MHz, 9 plane waves over +-10 degrees) and the default
-# 0.5 mm box head, with the ray backend and statistical fidelity.
+# 0.5 mm box head, with the bent-ray backend and statistical fidelity.
 #
 # The pixel grid is the grid of the diffusion prior (configs/prior_default.yaml,
 # neurosim.recon.cbv_images.pixel_grid): 32 x 32 pixels of 1 mm, top row at z = 12 mm,
@@ -40,12 +40,12 @@ imaging:
     electronic_snr_db: 20.0
   fidelity: statistical
 backend:
-  backend: ray
+  backend: bent_ray           # refracted first arrivals (ROADMAP D-021)
 ct_prior:
   slab_half_slices: 0            # only the central slice enters the plane's medium
 medium_spacing: 1.0e-4           # m
 source_refinement: 2             # 0.5 mm sub-cells; one sample per 1 mm pixel overstates the
                                  # clean blood signal 2.2 times, 2 x 2 is within 1 % of 4 x 4
 trials:
-  n_images: 60
-  image_interval: 2.0            # s: 0 to 118 s, three 20 s task blocks and the rests between
+  n_images: 120
+  image_interval: 1.0            # s: 0 to 119 s, three 20 s task blocks and the rests between

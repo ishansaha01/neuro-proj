@@ -1,5 +1,5 @@
 # Default run, ROADMAP settings: 128-element array at 2 MHz, 9 plane waves over +-10 degrees,
-# the 0.5 mm box head, the ray backend and statistical fidelity, with the fUS default ROI
+# the 0.5 mm box head, the bent-ray backend and statistical fidelity, with the fUS default ROI
 # (30 mm x 30 mm from 20 mm depth) on 64 x 64 pixels and the clinical CT geometry.
 # Estimated by scripts/run_pipeline.py --estimate-only on the 2-core development machine:
 # about 24 minutes single-threaded (the 16 operator passes take 22 of them), 2.05 GiB peak
@@ -32,7 +32,7 @@ imaging:
     spacing: null                # 0.476 mm, the largest that fits the ROI
   fidelity: statistical          # choice of this file; the fus default is scatterer
 backend:
-  backend: ray
+  backend: bent_ray
 ct_prior:
   slab_half_slices: 0            # choice of this file: only the central slice is used
 medium_spacing: 1.0e-4           # m

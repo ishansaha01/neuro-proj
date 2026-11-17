@@ -78,7 +78,8 @@ class RunConfig:
     backend: BackendConfig = field(
         default_factory=BackendConfig,
         doc="Backend of the true-skull and no-skull banks. The CT-derived bank and the "
-        "true-skull correction model always use its `ray` settings.",
+        "true-skull correction model use the same backend, except with `kwave`, where they "
+        "use `bent_ray` (a correction model must be cheap).",
     )
     ct: CtConfig = field(default_factory=CtConfig, doc="CT scan and HU -> acoustics constants.")
     ct_prior: CtPriorConfig = field(

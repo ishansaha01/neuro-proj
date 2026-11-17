@@ -46,11 +46,12 @@ def test_default_run_has_the_roadmap_settings():
     angles = cfg.imaging.sequence.angles_deg
     assert len(angles) == 9 and (angles[0], angles[-1]) == (-10.0, 10.0)
     assert cfg.head.grid.spacing == 0.5e-3 and cfg.head.grid.region == "box"
-    assert cfg.backend.backend == "ray" and trial_fidelity(cfg) == "statistical"
+    assert cfg.backend.backend == "bent_ray" and trial_fidelity(cfg) == "statistical"
     assert cfg.effects == SkullEffects()
     # Apart from the choices the file names, it is the package defaults.
     defaults = RunConfig()
-    assert cfg.head == defaults.head and cfg.ct == defaults.ct and cfg.backend == defaults.backend
+    assert cfg.head == defaults.head and cfg.ct == defaults.ct
+    assert cfg.backend == replace(defaults.backend, backend="bent_ray")
     assert cfg.imaging == replace(defaults.imaging, fidelity="statistical")
 
 
@@ -89,6 +90,6 @@ def test_demo_sweep_is_on_the_prior_grid_with_rest_and_task_images():
     sweep = from_dict(SweepConfig, load_yaml(CONFIG_DIR / "sweep_demo.yaml"))
     assert sweep.n_scenes == 8
     assert pixel_grid_from_config(sweep.base.imaging) == pixel_grid(PixelGridConfig())
-    assert 20 <= sweep.base.trials.n_images <= 60
+    assert 20 <= sweep.base.trials.n_images <= 120
     # The centre frequency is not swept, so every scene keeps that grid and array.
     assert sweep.center_frequencies == ()

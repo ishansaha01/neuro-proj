@@ -103,7 +103,7 @@ class GreensBank:
         B: complex64, shape (nf, n_elements, nz_roi, nx_roi).
         c_ref: sound speed of the reference medium [m/s].
         transducer: the array the bank was computed for.
-        backend: name of the backend that produced it ("analytic", "ray", "kwave").
+        backend: name of the backend that produced it ("analytic", "ray", "bent_ray", "kwave").
         static_fmc: optional full-matrix response of the static medium (skull echoes) at
             the array, complex64, shape (nf, n_elements_tx, n_elements_rx), in units of
             pressure spectrum per unit source spectrum (same normalisation as G_medium).
