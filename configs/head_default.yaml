@@ -1,0 +1,9 @@
+# Default ground-truth head: an 80 mm box at 0.5 mm around the target and the probe
+# (160^3 = 4.1e6 voxels, about 0.5 GB peak memory, about 5 s). It holds an imaging plane
+# about 50 mm wide and 55 mm deep under the default probe; enlarge box_size for more.
+# Every key not listed keeps the default documented in src/neurosim/head/config.py.
+grid:
+  spacing: 0.5e-3
+  region: box
+  box_size: [0.08, 0.08, 0.08]
+  box_center_depth: 0.025

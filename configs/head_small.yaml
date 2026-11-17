@@ -1,0 +1,9 @@
+# Small head for unit tests and evals: a 64 mm box at 2 mm (32^3 = 3.3e4 voxels,
+# a few MB, well under a second). It holds an imaging plane about 40 mm wide and
+# 40 mm deep under the default probe. The skull is only about three voxels thick
+# in 3D; the fine imaging plane still gets sharp layers from the interpolated SDFs.
+grid:
+  spacing: 2.0e-3
+  region: box
+  box_size: [0.064, 0.064, 0.064]
+  box_center_depth: 0.02
