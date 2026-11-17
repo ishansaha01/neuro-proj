@@ -22,9 +22,9 @@ This file is the project's working plan and its record of every change. It has t
 - [x] Repo created and cloned; proposal page 1 added
 - [x] README.md and ROADMAP.md
 - [ ] Python toolchain: this Mac only has system Python 3.9. Install `uv` and pin Python 3.11+ (needs your OK, since it downloads an installer)
-- [ ] `pyproject.toml` with pinned dependencies: numpy, scipy, pyyaml, h5py or zarr, matplotlib, k-wave-python, scikit-image; optional jax and jwave
-- [ ] Package skeleton `src/neurosim/` with `common/` (seed tree, units, config schema, I/O)
-- [ ] Determinism test: same config and seed give byte-identical outputs
+- [x] `pyproject.toml` with pinned dependencies: numpy, scipy, pyyaml, h5py or zarr, matplotlib, k-wave-python, scikit-image; optional jax and jwave
+- [x] Package skeleton `src/neurosim/` with `common/` (seed tree, units, config schema, I/O)
+- [x] Determinism test: same config and seed give byte-identical outputs
 
 ### Phase 1 — Ground-truth head *(Tue 17 Nov)*
 Output: one HDF5/Zarr file per head holding 3D voxel maps on a common grid (default 0.5 mm isotropic), plus the config that made it.
@@ -99,6 +99,13 @@ Aberration, attenuation, reverberation, tissue clutter, electronic noise and CT 
 ---
 
 ## 3. Change log
+
+### 2026-11-17 — Phase 0: shared core, packaging and eval harness
+- **What:** Added `docs/ARCHITECTURE.md` (module boundaries and data contracts) and the contract type files `src/neurosim/{head,fus,ct}/types.py` and `src/neurosim/fus/reference.py`. Added `pyproject.toml` (setuptools, src layout, dependencies pinned with `==`, extras `recon` and `dev`), `.gitignore`, the `neurosim` package skeleton and `neurosim.common`: `seeding` (`SeedTree`: named, order-independent streams on `SeedSequence` spawn keys, with child subtrees), `units`, `constants`, `config` (strict frozen-dataclass loading, canonical YAML, config hash), `grid` (`Grid3D`, `Grid2D`, `PlaneSpec`, volume and plane sampling), `io` (byte-deterministic HDF5 bundles with provenance) and `evalkit` (`@eval_case`, `report`). `scripts/build_registry.py` generates `evals/REGISTRY.md` from the eval decorators and the latest results, so the registry is never typed by hand.
+- **Why:** One source of truth for randomness, units, constants, grids, config validation and output format before the head, fUS and CT packages are built on top (D-004; CLAUDE.md sections 1 and 2).
+- **Notes:** Built with Python 3.11 through `uv`; the package supports Python 3.10 and later. Water and air constants use a 20 °C reference state; `C_WATER` and `RHO_WATER` are marked "assumed, to verify" (see open items). Seed sub-indices are limited to below 2^32.
+- **Files:** `docs/ARCHITECTURE.md`, `pyproject.toml`, `.gitignore`, `src/neurosim/**/__init__.py`, `src/neurosim/common/*`, `src/neurosim/{head,fus,ct}/types.py`, `src/neurosim/fus/reference.py`, `scripts/{run_evals,build_registry}.py`, `evals/common/*`, `evals/REGISTRY.md`, `tests/unit/common/*`, `tests/unit/scripts/*`.
+- **Evals added:** E-COMMON-001 (bundle writes are byte-identical across processes; passing), E-COMMON-002 (a seed stream depends only on root seed, name and sub-index; passing). Unit tests: 100 passing.
 
 ### 2026-11-16 — Add CLAUDE.md
 - **What:** Added `CLAUDE.md` with working rules for the repo: distinct physics evals with a registry (`evals/REGISTRY.md`, one claim per eval, thresholds fixed in advance), separate from unit tests; clean, non-duplicated code (single source of truth for constants, units, grids and randomness); grounding every number in a source; and logging every change here.

@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neurosim"
+dynamic = ["version"]
+description = "Deterministic, physics-grounded simulator of a 3D head, a functional-ultrasound sensor and a CT scanner"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy==2.2.6",
+    "scipy==1.15.3",
+    "pyyaml==6.0.3",
+    "h5py==3.16.0",
+    "matplotlib==3.10.9",
+    "scikit-image==0.26.0",
+    "k-wave-python==0.6.2",
+    "spekpy==2.5.4",
+    "xraydb==4.6.1",
+]
+
+[project.optional-dependencies]
+recon = ["torch==2.15.0"]
+dev = ["pytest==9.2.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+# Single source of truth for the version: src/neurosim/__init__.py (0.1.0).
+version = { attr = "neurosim.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+pythonpath = ["src", "."]
+# importlib mode lets two areas have test files with the same basename
+# (tests/unit/head/test_types.py and tests/unit/fus/test_types.py).
+addopts = ["--import-mode=importlib"]
+markers = [
+    "eval: physics or determinism eval registered through neurosim.common.evalkit",
+]
