@@ -19,8 +19,9 @@ medium (c1, rho1) has `B = H0(k1 r) / H0(k_ref r)` whatever its density, and
 `rho(r_e) G(r | r_e) = rho(r) G(r_e | r)`, so the same B serves transmit and
 receive up to the constant density ratio between the array face and the ROI.
 
-Backends: `analytic` (reference medium, B = 1), `ray` (`ray.py`), `kwave`
-(`fullwave.py`; the solver is imported only when this backend is used).
+Backends: `analytic` (reference medium, B = 1), `ray` (`ray.py`: straight rays),
+`bent_ray` (`bent_ray.py`: refracted first arrivals from the eikonal equation),
+`kwave` (`fullwave.py`; the solver is imported only when this backend is used).
 """
 
 from __future__ import annotations
@@ -31,15 +32,22 @@ import numpy as np
 
 from neurosim.common.grid import Grid2D
 from neurosim.fus.backends.analytic import analytic_bank
-from neurosim.fus.backends.config import BackendConfig, KWaveConfig, RayConfig
+from neurosim.fus.backends.bent_ray import (
+    bent_ray_bank,
+    bent_ray_travel_times,
+    estimate_bent_ray_cost,
+)
+from neurosim.fus.backends.config import BackendConfig, BentRayConfig, KWaveConfig, RayConfig
 from neurosim.fus.backends.ray import estimate_ray_cost, ray_bank, ray_travel_times
 from neurosim.fus.types import GreensBank, Transducer
 from neurosim.head.types import PlaneMedium
 
 __all__ = [
     "BackendConfig",
+    "BentRayConfig",
     "KWaveConfig",
     "RayConfig",
+    "bent_ray_travel_times",
     "compute_bank",
     "estimate_cost",
     "ray_travel_times",
@@ -64,7 +72,7 @@ def estimate_cost(
 
     Returns:
         dict with at least `grid_points` (grid points of one simulation, absorbing
-        layer included; the medium grid for `ray`), `time_steps`, `n_simulations`,
+        layer included; the medium grid for `ray` and `bent_ray`), `time_steps`, `n_simulations`,
         `memory_bytes` (peak estimate) and `run_time_s` (wall-clock estimate). The
         `kwave` backend adds `reference_grid_points` and `phase_error_bound_rad`.
     """
@@ -80,6 +88,8 @@ def estimate_cost(
         }
     if cfg.backend == "ray":
         return estimate_ray_cost(medium, transducer, roi, freqs, cfg.ray)
+    if cfg.backend == "bent_ray":
+        return estimate_bent_ray_cost(medium, transducer, roi, freqs, cfg.bent_ray)
     from neurosim.fus.backends import fullwave_plan
 
     plan = fullwave_plan.build_plan(medium, transducer, roi, freqs, cfg.kwave)
@@ -121,6 +131,8 @@ def compute_bank(
         return analytic_bank(medium, transducer, roi, freqs)
     if cfg.backend == "ray":
         return ray_bank(medium, transducer, roi, freqs, cfg.ray)
+    if cfg.backend == "bent_ray":
+        return bent_ray_bank(medium, transducer, roi, freqs, cfg.bent_ray)
     from neurosim.fus.backends import fullwave
 
     return fullwave.fullwave_bank(medium, transducer, roi, freqs, cfg.kwave)

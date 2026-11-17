@@ -45,6 +45,98 @@ class RayConfig:
 
 
 @dataclass(frozen=True)
+class BentRayConfig:
+    """Settings of the bent-ray (eikonal) backend."""
+
+    step_fraction: float = field(
+        1.0,
+        gt=0.0,
+        le=1.0,
+        doc="Step of the traced rays, as a fraction of the medium grid spacing dx "
+        "[dimensionless]. The integrals use the midpoint rule on the same bilinear maps as "
+        "the `ray` backend, with the same error bound per interface (dx / 8 of path times the "
+        "slowness jump at 1.0). Modelling choice, as `RayConfig.step_fraction`.",
+    )
+    sweep_tolerance: float = field(
+        1.0e-6,
+        gt=0.0,
+        lt=1.0,
+        doc="Smallest decrease of a node's travel time that the eikonal sweeps count as an "
+        "update, as a fraction of the time to cross one grid cell at the highest sound speed "
+        "[dimensionless]. The sweeps stop when four in a row make no update. Over a path of N "
+        "cells the result is within N times this of the scheme's fixed point: 3e-11 s over "
+        "1000 cells of 0.1 mm at 3500 m/s. Numerical setting.",
+    )
+    max_sweeps: int = field(
+        120,
+        ge=4,
+        doc="Upper bound on the eikonal line sweeps of one batch of elements; reaching it "
+        "raises an error. A plane through the default head needs 21 (measured, seed 0) and a "
+        "flat slab 13; each sweep settles the rays within 45 degrees of its direction, so "
+        "media with strongly winding first-arrival paths need more. Numerical setting.",
+    )
+    layer_normal_scale: float = field(
+        1.0e-3,
+        gt=0.0,
+        doc="Scale over which the orientation of the slowness gradients is averaged to give "
+        "the local normal of the layering, against which the angles of incidence are measured "
+        "(the integration scale of a structure tensor) [m]. Assumed, to verify: 1 mm is well "
+        "below the thickness and the radius of curvature of the skull, and ten cells of the "
+        "0.1 mm production grid, so the pixel staircase and the texture inside the bone "
+        "average out against the scalp-bone and bone-brain surfaces.",
+    )
+    interface_contrast: float = field(
+        0.1,
+        gt=0.0,
+        doc="Relative sound-speed step between two successive ray samples at and above which "
+        "the step is a refracting interface whose transmission coefficient takes the angle of "
+        "refraction from Snell's law in full; below it the angle enters with a weight that "
+        "falls smoothly to 0, leaving the normal-incidence coefficient [dimensionless]. "
+        "Assumed, to verify: 0.1 keeps the water-scalp (0.09), scalp-bone (0.7) and bone-brain "
+        "(0.9) surfaces of the head model and excludes the gradual variation inside the bone "
+        "(at most about 0.03 per 0.1 mm sample), which does not follow the layering.",
+    )
+    grazing_taper_deg: float = field(
+        10.0,
+        gt=0.0,
+        le=90.0,
+        doc="Width of the taper that takes the amplitude to zero as the refracted ray "
+        "approaches grazing along the layers, i.e. towards and beyond the critical angle "
+        "[degrees of the angle between ray and layering]: the amplitude is untouched while "
+        "the ray stays further than this from grazing everywhere, and zero at grazing. "
+        "Assumed, to verify: 10 degrees covers the scatter of the numerical ray directions "
+        "(a 1 to 2 % error of the slowness component along the layers is 8 to 11 degrees at "
+        "grazing), and through a 6.5 mm slab at 2500 m/s the ray amplitude 10 degrees from "
+        "grazing is already below a tenth of its normal-incidence value.",
+    )
+    max_batch_bytes: int = field(
+        256 * _MEBIBYTE,
+        gt=0,
+        doc="Memory budget for the fields and rays of the elements solved together [bytes]. "
+        "Numerical setting, no effect on the result.",
+    )
+    seconds_per_node_solve: float = field(
+        6.5e-7,
+        gt=0.0,
+        doc="Run-time model: seconds per grid node and element for the eikonal solve (about 20 "
+        "line sweeps) on one core. Measured on the 2-core development machine for a 0.1 mm "
+        "plane through the default head (seed 0), 21 elements per batch.",
+    )
+    seconds_per_sample: float = field(
+        3.5e-7,
+        gt=0.0,
+        doc="Run-time model: seconds per ray sample (direction, integrands and interface "
+        "coefficient) on one core. Measured on the 2-core development machine.",
+    )
+    seconds_per_bank_value: float = field(
+        1.0e-7,
+        gt=0.0,
+        doc="Run-time model: seconds per bank value (one complex exponential) on one core. "
+        "Measured on the 2-core development machine.",
+    )
+
+
+@dataclass(frozen=True)
 class KWaveConfig:
     """Settings of the full-wave backend (k-wave-python, pure-Python k-space solver)."""
 
@@ -166,10 +258,13 @@ class KWaveConfig:
 class BackendConfig:
     """Which backend computes the Green's bank, and its settings."""
 
-    backend: Literal["analytic", "ray", "kwave"] = field(
+    backend: Literal["analytic", "ray", "bent_ray", "kwave"] = field(
         "ray", doc="Backend name (docs/ARCHITECTURE.md, section 5)."
     )
     ray: RayConfig = field(default_factory=RayConfig, doc="Settings of the `ray` backend.")
+    bent_ray: BentRayConfig = field(
+        default_factory=BentRayConfig, doc="Settings of the `bent_ray` backend."
+    )
     kwave: KWaveConfig = field(
         default_factory=KWaveConfig, doc="Settings of the `kwave` backend."
     )
