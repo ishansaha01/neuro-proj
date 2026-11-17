@@ -1,0 +1,44 @@
+# Default diffusion prior on clean CBV images (32 x 32 pixels of 1 mm, top row 12 mm
+# below the array). One file drives both scripts:
+#   python scripts/make_prior_dataset.py --config configs/prior_default.yaml --seed 0 --out outputs/prior/dataset.h5
+#   python scripts/train_prior.py --config configs/prior_default.yaml --data outputs/prior/dataset.h5 --seed 0 --out outputs/prior/prior.pt
+# Sized for the shared 2-core development machine: the data set takes about 3 minutes
+# (0.22-0.3 s per head, single-threaded; 189 s measured) and training 15 minutes on
+# 2 threads. A step took 0.23 s with the cores free and up to 0.42 s with other jobs
+# running, so the wall-time limit may end the run before n_steps: the run behind
+# outputs/prior/prior.pt (2026-11-17, seed 0) completed 3478 of 3600 steps. With
+# 2 threads on a shared machine start Python with OMP_WAIT_POLICY=passive (see
+# src/neurosim/recon/train.py).
+# Every key not listed keeps the default documented in
+# src/neurosim/recon/{cbv_images,transform,unet,diffusion,train}.py.
+data:
+  head:
+    # Coarse head: a 60 mm box at 1 mm (2.2e5 voxels), centred at the depth of the image centre.
+    grid:
+      spacing: 1.0e-3
+      region: box
+      box_size: [0.06, 0.06, 0.06]
+      box_center_depth: 0.0255
+  pixel_grid:
+    n: 32
+    spacing: 1.0e-3
+    top_depth: 12.0e-3
+    lateral_center: 0.0
+  n_heads: 640        # 576 training and 64 held-out heads
+  planes_per_head: 8  # 5120 images
+unet:                 # 1.95 M parameters
+  base_channels: 16
+  channel_multipliers: [1, 2, 4, 8]
+  blocks_per_level: 1
+  norm_groups: 8
+  attention: true
+diffusion:
+  n_timesteps: 1000
+training:
+  n_steps: 3600
+  batch_size: 32
+  learning_rate: 1.0e-3
+  ema_decay: 0.998
+  eval_every: 300
+  num_threads: 2
+  max_wall_minutes: 15.0

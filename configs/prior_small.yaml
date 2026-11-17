@@ -1,0 +1,35 @@
+# Tiny diffusion prior for tests: 16 x 16 images of 2 mm pixels from 2 mm heads, a
+# 33 k-parameter U-Net and 300 steps. Data set and training together take well
+# under a minute on one thread. The samples are not meant to look good.
+data:
+  head:
+    grid:
+      spacing: 2.0e-3
+      region: box
+      box_size: [0.064, 0.064, 0.064]
+      box_center_depth: 0.0255
+  pixel_grid:
+    n: 16
+    spacing: 2.0e-3
+    top_depth: 12.0e-3
+    lateral_center: 0.0
+  n_heads: 20
+  planes_per_head: 8
+  heldout_every: 5
+unet:
+  base_channels: 8
+  channel_multipliers: [1, 2]
+  blocks_per_level: 1
+  norm_groups: 4
+  attention: true
+diffusion:
+  n_timesteps: 200
+training:
+  n_steps: 300
+  batch_size: 16
+  learning_rate: 2.0e-3
+  warmup_steps: 20
+  ema_decay: 0.98
+  eval_every: 100
+  eval_images: 32
+  num_threads: 1
