@@ -1,0 +1,11 @@
+# Small CT scan for unit tests and evals: coarse detector, few views, four slices
+# of a 2 mm grid. Field of view 0.22 m (radius 0.110 m); one 100 x 100 slice
+# takes about 1 s. Values not listed keep the defaults of
+# neurosim.ct.config.CtConfig.
+geometry:
+  n_views: 240
+  n_detectors: 192
+  detector_pitch: 2.1e-3
+slab_z_range: [-0.004, 0.004]
+calibration_phantom_diameter: 0.16
+max_chunk_samples: 2000000

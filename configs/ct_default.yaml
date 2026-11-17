@@ -1,0 +1,29 @@
+# Default CT scan: 120 kVp head protocol, clinical fan-beam geometry, 8 mm slab.
+# Every value equals the default of neurosim.ct.config.CtConfig (checked by
+# tests/unit/ct/test_config.py); sources are in the field docs there. The
+# HU -> acoustics constants (hu_mapping) keep their defaults.
+# Cost on a 0.5 mm head grid (440 x 440 pixels per slice): about 2 minutes per
+# slice single-threaded and 0.5 GB in total for the 16-slice slab;
+# scripts/run_ct.py prints the estimate before it starts.
+kvp: 120.0
+anode_angle_deg: 12.0
+filtration_al_mm: 6.0
+mas: 200.0
+energy_bin_kev: 2.0
+monoenergetic_kev: null
+geometry:
+  source_isocenter_distance: 0.595
+  source_detector_distance: 1.0856
+  n_views: 720
+  n_detectors: 736
+  detector_pitch: 1.2858e-3
+  detector_height: 1.1e-3
+kernel: ramp
+slab_z_range: [-0.004, 0.004]
+photon_noise: true
+noise_scale: 1.0
+water_correction: true
+calibration_phantom_diameter: 0.2
+ray_step_fraction: 0.5
+log_floor_photons: 1.0
+max_chunk_samples: 4000000
