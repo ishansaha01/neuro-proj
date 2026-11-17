@@ -162,6 +162,13 @@ Through a flat 6.5 mm slab at 2500 m/s the straight-ray travel time is later tha
 
 ## 3. Change log
 
+### 2026-11-17 — Full verification from a clean commit; registry regenerated
+- **What:** Ran every unit test and every eval from the clean commit `64aa39e` (one BLAS thread, Linux, Python 3.11) and regenerated `evals/REGISTRY.md` from the results. All 64 stored eval results are stamped with that commit, with no `-dirty` suffix.
+- **Why:** The independent review found that the tracked registry listed 2 of 62 evals and that stored results named commits that did not contain their code.
+- **Results:** Unit tests: 684 passed. Evals: 58 passing, 6 failing, 0 not built. Failing and left failing: E-DATA-002 (CT bone label about 0.9 mm too thick), E-DATA-007 (the aberration switch does not sharpen the point-spread function on every seed), E-FUS-021 (straight rays against refracted arrivals, D-019), E-FUS-022 (statistical speckle variance, D-018), E-RECON-001 (denoiser against the Wiener filter at high noise), E-RECON-008 (calibration identifiability).
+- **Not verified:** nothing has been run on Windows or macOS, at more than one thread, or at full resolution (`configs/run_default.yaml` validates and estimates but has not been run). The experiment in `outputs/experiment` was produced before the review fixes, from a dirty tree, on datasets generated at earlier commits.
+- **Files:** `evals/REGISTRY.md`, `ROADMAP.md`.
+
 ### 2026-11-17 — Update milestone checklists and add open items
 - **What:** Ticked the Phase 1 to 5 checklist items that are built and have passing evals; left unticked, with a note, the items that are built but have a failing eval (noise ablation switches, paired dataset format, diffusion prior, uncertain-skull reconstruction). Added an "Open items" list of next steps in priority order.
 - **Why:** CLAUDE.md section 3: do not report a feature as done until its evals pass, and open a ROADMAP item for everything still to verify.
