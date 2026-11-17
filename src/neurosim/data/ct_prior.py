@@ -41,11 +41,12 @@ and how the slab meets it:
 
 - The isocentre is at grid ``x = y = 0``: here the slab origin ``c``, the centre
   of the scanned region, which also gives the shortest rays (lowest cost).
-- Slices are planes of constant grid ``z``, selected by ``CtConfig.slab_z_range``
-  in the grid's own z coordinate. In the slab frame that coordinate is ``w``,
-  so the ``slab_z_range`` of the scan config (a head-frame axial interval) does
-  not apply: `scan_plane` scans every slice of the slab grid and the slab
-  thickness is set by `CtPriorConfig.slab_half_slices`.
+- Slices are planes of constant grid ``z``, selected by
+  ``CtConfig.slab_z_from_center`` about the centre of the grid's z extent. In
+  the slab frame that coordinate is ``w`` and the slab grid already holds only
+  the slices wanted, so the ``slab_z_from_center`` of the scan config is not
+  used: `scan_plane` scans every slice of the slab grid and the slab thickness
+  is set by `CtPriorConfig.slab_half_slices`.
 - Every material other than air must lie inside the scan field of view (a disc
   of radius ``FanBeamGeometry.fov_radius`` about the isocentre);
   `simulate_ct_fractions` raises ``ValueError`` otherwise.
@@ -78,12 +79,7 @@ from neurosim.common.grid import (
     sample_volume,
 )
 from neurosim.common.seeding import SeedTree
-from neurosim.ct.acoustics import (
-    BONE_THRESHOLD_HU,
-    hu_to_acoustic,
-    nominal_hu_mapping,
-    sample_hu_mapping,
-)
+from neurosim.ct.acoustics import hu_to_acoustic, nominal_hu_mapping, sample_hu_mapping
 from neurosim.ct.config import CtConfig
 from neurosim.ct.simulate import estimate_cost as estimate_ct_cost
 from neurosim.ct.simulate import simulate_ct_fractions
@@ -92,9 +88,10 @@ from neurosim.head.types import HeadVolume, PlaneMedium, Tissue
 
 _AIR = BASIS_MATERIALS.index("air")
 
-# Slack, in voxels, when counting the voxels needed to cover a length, so that a
-# length that is a whole number of voxels up to rounding does not gain one.
-_VOXEL_COUNT_TOLERANCE = 1.0e-9
+# Slack, in grid cells (voxels or pixels), when counting the cells needed to cover a
+# length, so that a length that is a whole number of cells up to rounding does not
+# gain one. Shared with `data.config.medium_grid`.
+CELL_COUNT_TOLERANCE = 1.0e-9
 
 # Keys of `CtVolume.meta` written by `scan_plane`.
 _META_FRAME = "slab_frame"
@@ -203,7 +200,7 @@ def slab_grid(extent_x: Range, extent_z: Range, spacing: float, cfg: CtPriorConf
     for name, values in (("extent_x", extent_x), ("extent_z", extent_z)):
         first, last = _checked_range(values, name)
         half_width = 0.5 * (last - first) + cfg.margin
-        in_plane.append(2 * math.ceil(half_width / spacing - _VOXEL_COUNT_TOLERANCE) + 1)
+        in_plane.append(2 * math.ceil(half_width / spacing - CELL_COUNT_TOLERANCE) + 1)
     shape = (*in_plane, 2 * cfg.slab_half_slices + 1)
     return Grid3D.centered(tuple(n * spacing for n in shape), spacing)
 
@@ -243,7 +240,7 @@ def plane_aligned_fractions(
 
 def _slab_scan_config(ct_cfg: CtConfig) -> CtConfig:
     """The scan settings with every slice of the slab grid selected."""
-    return dataclasses.replace(ct_cfg, slab_z_range=None)
+    return dataclasses.replace(ct_cfg, slab_z_from_center=None)
 
 
 def scan_plane(
@@ -259,7 +256,7 @@ def scan_plane(
 
     head: the 3D head.
     plane: the imaging plane in the head frame.
-    ct_cfg: scan settings. ``ct_cfg.slab_z_range`` is ignored: every slice of
+    ct_cfg: scan settings. ``ct_cfg.slab_z_from_center`` is ignored: every slice of
         the slab is scanned (module docstring).
     cfg: slab settings.
     tree: seed tree of the run; slab slice ``iw`` draws its photon noise from
@@ -337,7 +334,12 @@ def prior_hu_mapping(ct_cfg: CtConfig, cfg: CtPriorConfig, tree: SeedTree) -> Hu
 
 
 def ct_plane_medium(
-    hu_plane: np.ndarray, grid: Grid2D, plane: PlaneSpec, mapping: HuMapping, alpha_power: float
+    hu_plane: np.ndarray,
+    grid: Grid2D,
+    plane: PlaneSpec,
+    mapping: HuMapping,
+    alpha_power: float,
+    bone_threshold_hu: float,
 ) -> PlaneMedium:
     """Acoustic estimate of the imaging plane from the CT alone.
 
@@ -345,8 +347,8 @@ def ct_plane_medium(
     applied pixel by pixel on the fine grid. The fields a CT cannot know are
     filled as follows:
 
-    - ``labels``: `Tissue.SKULL_OUTER` where ``HU >= BONE_THRESHOLD_HU`` (the
-      bone threshold of `ct.acoustics`), `Tissue.BACKGROUND` elsewhere. The CT
+    - ``labels``: `Tissue.SKULL_OUTER` where ``HU >= bone_threshold_hu``,
+      `Tissue.BACKGROUND` elsewhere. The CT
       separates neither the skull layers nor the soft tissues, so
       ``SKULL_OUTER`` stands for "bone" (it makes `head.materials.skull_mask`
       work on this medium) and ``BACKGROUND`` for everything else.
@@ -362,14 +364,16 @@ def ct_plane_medium(
     mapping: constants of the HU -> acoustics map.
     alpha_power: power-law exponent ``y`` the absorption prefactors of
         ``mapping`` are expressed for (``CtConfig.hu_mapping.alpha_power``) [-].
+    bone_threshold_hu: CT number from which a pixel is bone [HU]
+        (``CtConfig.hu_mapping.bone_threshold_hu``).
 
     Returns the CT-derived `PlaneMedium` (arrays ``[iz, ix]``, float32; labels uint8).
     """
     hu_plane = np.asarray(hu_plane)
     if hu_plane.shape != grid.shape:
         raise ValueError(f"hu_plane has shape {hu_plane.shape}, expected {grid.shape}")
-    sound_speed, density, attenuation = hu_to_acoustic(hu_plane, mapping)
-    is_bone = hu_plane >= BONE_THRESHOLD_HU
+    sound_speed, density, attenuation = hu_to_acoustic(hu_plane, mapping, bone_threshold_hu)
+    is_bone = hu_plane >= bone_threshold_hu
     labels = np.where(is_bone, Tissue.SKULL_OUTER, Tissue.BACKGROUND).astype(np.uint8)
     porosity = (mapping.c_bone - sound_speed) / (mapping.c_bone - mapping.c_water)
     porosity = np.where(is_bone, np.clip(porosity, 0.0, 1.0), 0.0).astype(np.float32)
@@ -426,7 +430,9 @@ def ct_prior_medium(
     ct = scan_plane(head, plane, ct_cfg, cfg, tree, (x[0], x[-1]), (z[0], z[-1]))
     hu_plane = ct_plane_hu(ct, grid, plane)
     mapping = prior_hu_mapping(ct_cfg, cfg, tree)
-    return ct, ct_plane_medium(hu_plane, grid, plane, mapping, alpha_power)
+    return ct, ct_plane_medium(
+        hu_plane, grid, plane, mapping, alpha_power, ct_cfg.hu_mapping.bone_threshold_hu
+    )
 
 
 def estimate_cost(

@@ -45,7 +45,7 @@ def test_config_round_trips_through_plain_data(small_cfg):
         {"geometry": {"n_views": 2}},
         {"geometry": {"source_detector_distance": 0.5}},
         {"monoenergetic_kev": 150.0},
-        {"slab_z_range": [0.01, -0.01]},
+        {"slab_z_from_center": [0.01, -0.01]},
         {"calibration_phantom_diameter": 0.6},
         {"hu_mapping": {"c_bone_range": [3100.0, 2700.0]}},
     ],

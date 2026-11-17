@@ -26,6 +26,11 @@ _LIBVER = ("earliest", "v110")
 _JSON_ATTRS = "__json_attrs__"
 # numpy dtype kinds a bundle can hold: bool, signed/unsigned integer, float, complex.
 _ARRAY_KINDS = "biufc"
+# Directory of the installed `neurosim` package; `git_commit` reports the repository tracking it.
+_PACKAGE_DIR = Path(__file__).resolve().parents[1]
+# `git_commit` when the commit cannot be determined, and its suffix for a modified work tree.
+_UNKNOWN_COMMIT = "unknown"
+_DIRTY_SUFFIX = "-dirty"
 
 
 def _canonical_json(value: Any) -> str:
@@ -104,7 +109,6 @@ def load_bundle(path: str | os.PathLike[str]) -> tuple[dict[str, np.ndarray], di
     with the stored dtype, and attributes as plain Python values.
     """
     arrays: dict[str, np.ndarray] = {}
-    attrs: dict[str, Any] = {}
     with h5py.File(path, "r") as file:
 
         def collect(name: str, item: h5py.Group | h5py.Dataset) -> None:
@@ -112,34 +116,80 @@ def load_bundle(path: str | os.PathLike[str]) -> tuple[dict[str, np.ndarray], di
                 arrays[name] = np.asarray(item[()])
 
         file.visititems(collect)
-        json_names = set(json.loads(file.attrs[_JSON_ATTRS]))
-        for name, value in file.attrs.items():
-            if name == _JSON_ATTRS:
-                continue
-            if name in json_names:
-                attrs[name] = json.loads(value)
-            else:
-                attrs[name] = value.item() if isinstance(value, np.generic) else value
+        attrs = _read_attrs(file)
     return arrays, attrs
 
 
-def git_commit() -> str:
-    """Return ``git rev-parse HEAD`` of the repository holding this package.
+def load_attrs(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """Read only the attributes of a bundle written by `save_bundle`, without its arrays.
 
-    Returns ``"unknown"`` when git is not installed or the package is not
-    inside a git work tree.
+    Returns the attributes as plain Python values, as `load_bundle` does. The
+    cost does not grow with the size of the stored arrays.
+    """
+    with h5py.File(path, "r") as file:
+        return _read_attrs(file)
+
+
+def _read_attrs(file: h5py.File) -> dict[str, Any]:
+    attrs: dict[str, Any] = {}
+    json_names = set(json.loads(file.attrs[_JSON_ATTRS]))
+    for name, value in file.attrs.items():
+        if name == _JSON_ATTRS:
+            continue
+        if name in json_names:
+            attrs[name] = json.loads(value)
+        else:
+            attrs[name] = value.item() if isinstance(value, np.generic) else value
+    return attrs
+
+
+def _git(directory: Path, *arguments: str) -> str | None:
+    """Standard output of a read-only git command run in `directory`; None if it fails.
+
+    ``--no-optional-locks`` keeps the command from writing to the repository
+    (``git status`` would otherwise refresh the index).
     """
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=Path(__file__).resolve().parent,
+            ["git", "--no-optional-locks", "-C", str(directory), *arguments],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     except OSError:
-        return "unknown"
-    return result.stdout.strip() if result.returncode == 0 else "unknown"
+        # git is not installed, or the directory does not exist.
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
+def git_commit() -> str:
+    """Return the commit of the repository that holds this package's source.
+
+    The value is ``git rev-parse HEAD`` of the work tree that tracks the
+    package directory, with the suffix ``-dirty`` when any tracked file of
+    that work tree has uncommitted changes (``git status --porcelain
+    --untracked-files=no`` is not empty; untracked files do not count).
+
+    Returns ``"unknown"`` when git is not installed, when the package is not
+    inside a git work tree, or when the work tree around it does not track the
+    package (a non-editable install into a ``site-packages`` directory that
+    happens to lie inside some other repository).
+    """
+    located = _git(_PACKAGE_DIR, "rev-parse", "--show-toplevel", "HEAD")
+    if located is None:
+        return _UNKNOWN_COMMIT
+    toplevel, commit = located.splitlines()
+    # `--show-toplevel` is the work tree around the package directory; it is the
+    # package's own repository only if it also tracks the package source.
+    if not _PACKAGE_DIR.is_relative_to(Path(toplevel).resolve()):
+        return _UNKNOWN_COMMIT
+    if _git(_PACKAGE_DIR, "ls-files", "--error-unmatch", "--", "__init__.py") is None:
+        return _UNKNOWN_COMMIT
+    changes = _git(Path(toplevel), "status", "--porcelain", "--untracked-files=no")
+    if changes is None:
+        return _UNKNOWN_COMMIT
+    return commit + _DIRTY_SUFFIX if changes.strip() else commit
 
 
 def provenance(config_obj: Any, root_seed: int) -> dict:
@@ -153,8 +203,10 @@ def provenance(config_obj: Any, root_seed: int) -> dict:
         Root seed of the run's `SeedTree`.
 
     Returns a dict with keys ``config_yaml`` (canonical YAML text),
-    ``config_hash`` (its SHA-256), ``root_seed``, ``git_commit`` and
-    ``neurosim_version``, usable directly as bundle attributes.
+    ``config_hash`` (its SHA-256), ``root_seed``, ``git_commit`` (`git_commit`:
+    the commit hash, ``-dirty`` appended when tracked files had uncommitted
+    changes, or ``"unknown"``) and ``neurosim_version``, usable directly as
+    bundle attributes.
     """
     return {
         "config_yaml": dump_yaml(config_obj),

@@ -78,22 +78,6 @@ def unit_scatterer_factors(
     return transmit, receive
 
 
-def transmit_field(bank: GreensBank, sequence: PlaneWaveSequence, xz: np.ndarray) -> np.ndarray:
-    """Plane-wave transmit field `G_tx` of every steering angle at arbitrary points.
-
-    Args:
-        bank: the medium.
-        sequence: gives the steering angles.
-        xz: points [m], shape (..., 2), columns (x, z); inside the bank ROI.
-
-    Returns:
-        complex128 array, shape (nf, n_angles, ...) [dimensionless, per unit source spectrum].
-    """
-    xz = np.asarray(xz, dtype=np.float64)
-    transmit, _ = unit_scatterer_factors(bank, sequence, xz.reshape(-1, 2))
-    return transmit.reshape(*transmit.shape[:2], *xz.shape[:-1])
-
-
 def channel_spectra(
     bank: GreensBank, scatterers: Scatterers, sequence: PlaneWaveSequence
 ) -> np.ndarray:

@@ -1,4 +1,7 @@
-# Default CT scan: 120 kVp head protocol, clinical fan-beam geometry, 8 mm slab.
+# Default CT scan: 120 kVp head protocol, clinical fan-beam geometry, 8 mm slab
+# around the middle of the scanned volume (slab_z_from_center is measured from the
+# centre of the head grid's z extent, so it also fits a box-region head; null scans
+# every slice).
 # Every value equals the default of neurosim.ct.config.CtConfig (checked by
 # tests/unit/ct/test_config.py); sources are in the field docs there. The
 # HU -> acoustics constants (hu_mapping) keep their defaults.
@@ -19,7 +22,7 @@ geometry:
   detector_pitch: 1.2858e-3
   detector_height: 1.1e-3
 kernel: ramp
-slab_z_range: [-0.004, 0.004]
+slab_z_from_center: [-0.004, 0.004]
 photon_noise: true
 noise_scale: 1.0
 water_correction: true

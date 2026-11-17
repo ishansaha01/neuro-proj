@@ -18,9 +18,8 @@ from dataclasses import replace
 import numpy as np
 
 from neurosim.common.grid import Grid2D
-from neurosim.fus.types import PhaseScreen
 from neurosim.fus.pulse import pulse_spectrum
-from neurosim.fus.types import GreensBank
+from neurosim.fus.types import GreensBank, PhaseScreen
 
 
 def apply_phase_screen(bank: GreensBank, delays: np.ndarray, amplitudes: np.ndarray) -> GreensBank:

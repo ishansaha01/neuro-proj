@@ -49,18 +49,22 @@ def slice_indices(grid: Grid3D, cfg: CtConfig) -> range:
     """Axial slices (iz) scanned by a configuration on a grid.
 
     Returns the contiguous range of slices whose centres lie in
-    ``cfg.slab_z_range`` (all slices if it is None). Raises ``ValueError`` if
-    the slab contains no slice.
+    ``cfg.slab_z_from_center`` (all slices if it is None). The interval is
+    measured from the centre of the grid's z extent, the midpoint of its first
+    and last slice centres, so it selects the same slices wherever the grid
+    sits in the head frame. Raises ``ValueError`` if the slab contains no slice.
     """
-    if cfg.slab_z_range is None:
+    if cfg.slab_z_from_center is None:
         return range(grid.shape[2])
     z = grid.axes()[2]
-    low, high = cfg.slab_z_range
-    inside = np.flatnonzero((z >= low) & (z <= high))
+    center = 0.5 * (z[0] + z[-1])
+    low, high = cfg.slab_z_from_center
+    inside = np.flatnonzero((z >= center + low) & (z <= center + high))
     if inside.size == 0:
         raise ValueError(
-            f"slab_z_range {cfg.slab_z_range} m contains no slice of the grid "
-            f"(slice centres from {z[0]:.4f} to {z[-1]:.4f} m)"
+            f"slab_z_from_center {cfg.slab_z_from_center} m contains no slice of the grid "
+            f"(slice centres from {z[0] - center:.4f} to {z[-1] - center:.4f} m about the "
+            f"centre of its z extent, {grid.spacing:.4g} m apart)"
         )
     return range(int(inside[0]), int(inside[-1]) + 1)
 

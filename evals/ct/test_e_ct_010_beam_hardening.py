@@ -23,7 +23,7 @@ EDGE_ROI = (0.8 * BODY_RADIUS, 0.9 * BODY_RADIUS)
 def _cupping(cfg, grid) -> float:
     """Edge-minus-centre HU of the water cylinder [HU]."""
     fractions = layered_fractions(grid, [("water", disc_coverage(grid, BODY_RADIUS))])
-    one_slice = dataclasses.replace(cfg, photon_noise=False, slab_z_range=(0.0, 0.002))
+    one_slice = dataclasses.replace(cfg, photon_noise=False, slab_z_from_center=(0.0, 0.002))
     hu = simulate_ct_fractions(fractions, grid, one_slice, SeedTree(0)).hu[..., 0]
     radius = radial_distance(grid)
     edge = hu[(radius > EDGE_ROI[0]) & (radius < EDGE_ROI[1])].mean()

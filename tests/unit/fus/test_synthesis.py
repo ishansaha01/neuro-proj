@@ -15,7 +15,6 @@ from neurosim.fus.synthesis import (
     channel_spectra,
     static_clutter_spectra,
     transmit_delays,
-    transmit_field,
     transmit_phasors,
 )
 from neurosim.fus.types import Scatterers
@@ -67,15 +66,6 @@ def test_channel_spectra_match_the_defining_sum(tiny, water):
     spectra = channel_spectra(bank, scatterers, tiny.sequence)
     assert spectra.shape == (28, 3, 16) and spectra.dtype == np.complex128
     np.testing.assert_allclose(spectra, expected, rtol=1e-5, atol=1e-9 * np.abs(expected).max())
-
-
-def test_transmit_field_shape_and_value(tiny, water):
-    points = tiny.pixel_grid.points()
-    field = transmit_field(water, tiny.sequence, points)
-    assert field.shape == (28, 3, 8, 8)
-    greens = reference_greens(tiny.transducer, points, tiny.freqs, water.c_ref)
-    expected = np.einsum("fae,fezx->fazx", transmit_phasors(water, tiny.sequence), greens)
-    np.testing.assert_allclose(field, expected, rtol=1e-6)
 
 
 def test_superposition_and_chunking(tiny, water, monkeypatch):

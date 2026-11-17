@@ -51,7 +51,7 @@ def bone_rod_hu(small_grid) -> Callable[[CtConfig], float]:
     roi = radial_distance(small_grid, BONE_ROD_CENTER) < BONE_ROD_ROI_RADIUS
 
     def measure(cfg: CtConfig) -> float:
-        one_slice = dataclasses.replace(cfg, photon_noise=False, slab_z_range=(0.0, 0.002))
+        one_slice = dataclasses.replace(cfg, photon_noise=False, slab_z_from_center=(0.0, 0.002))
         hu = simulate_ct_fractions(fractions, small_grid, one_slice, SeedTree(0)).hu[..., 0]
         return float(hu[roi].mean())
 

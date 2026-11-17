@@ -44,7 +44,7 @@ WATER_ROI_CENTER = (0.0, -0.03)
 )
 def test_e_ct_004_monoenergetic_fbp(small_cfg, small_grid):
     cfg = dataclasses.replace(
-        small_cfg, monoenergetic_kev=ENERGY_KEV, photon_noise=False, slab_z_range=(0.0, 0.002)
+        small_cfg, monoenergetic_kev=ENERGY_KEV, photon_noise=False, slab_z_from_center=(0.0, 0.002)
     )
     layers = [("water", disc_coverage(small_grid, BODY_RADIUS))]
     layers += [

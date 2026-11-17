@@ -32,8 +32,8 @@ SLAB_B = (0.0, 0.008)  # slices 4..7
 )
 def test_e_ct_009_determinism(small_cfg, small_grid):
     fractions = layered_fractions(small_grid, [("water", disc_coverage(small_grid, 0.06))])
-    cfg_a = dataclasses.replace(small_cfg, slab_z_range=SLAB_A)
-    cfg_b = dataclasses.replace(small_cfg, slab_z_range=SLAB_B)
+    cfg_a = dataclasses.replace(small_cfg, slab_z_from_center=SLAB_A)
+    cfg_b = dataclasses.replace(small_cfg, slab_z_from_center=SLAB_B)
     first = simulate_ct_fractions(fractions, small_grid, cfg_a, SeedTree(SEED)).hu
     again = simulate_ct_fractions(fractions, small_grid, cfg_a, SeedTree(SEED)).hu
     other_slab = simulate_ct_fractions(fractions, small_grid, cfg_b, SeedTree(SEED)).hu

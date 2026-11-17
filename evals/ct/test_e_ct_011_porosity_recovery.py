@@ -36,7 +36,7 @@ BONE_FRACTIONS = (0.25, 0.5, 0.75, 1.0)
     seeds=(0,),
 )
 def test_e_ct_011_porosity_recovery(small_cfg, small_grid):
-    cfg = dataclasses.replace(small_cfg, photon_noise=False, slab_z_range=(0.0, 0.002))
+    cfg = dataclasses.replace(small_cfg, photon_noise=False, slab_z_from_center=(0.0, 0.002))
     angles = 2.0 * np.pi * np.arange(len(BONE_FRACTIONS)) / len(BONE_FRACTIONS)
     centers = [(RING_RADIUS * np.cos(a), RING_RADIUS * np.sin(a)) for a in angles]
     layers = [("water", disc_coverage(small_grid, BODY_RADIUS))]

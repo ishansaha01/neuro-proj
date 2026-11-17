@@ -13,17 +13,13 @@ from typing import Literal, Optional
 from neurosim.common.config import field
 from neurosim.common.grid import Grid2D
 from neurosim.ct.config import CtConfig
-from neurosim.data.ct_prior import CtPriorConfig
+from neurosim.data.ct_prior import CELL_COUNT_TOLERANCE, CtPriorConfig
 from neurosim.fus.backends import BackendConfig
 from neurosim.fus.config import ImagingConfig, roi_grid_from_config, transducer_from_config
 from neurosim.head.config import HeadConfig
 from neurosim.head.types import SkullEffects
 
 Fidelity = Literal["scatterer", "statistical"]
-
-# Slack, in grid cells, when counting the cells needed to cover a length, so that a
-# length that is a whole number of cells up to rounding does not gain one.
-_CELL_COUNT_TOLERANCE = 1.0e-9
 
 
 @dataclass(frozen=True)
@@ -158,8 +154,8 @@ def medium_grid(cfg: RunConfig) -> Grid2D:
     transducer = transducer_from_config(cfg.imaging)
     roi_z, roi_x = roi_grid_from_config(cfg.imaging).axes()
     half_width = max(0.5 * transducer.aperture, abs(roi_x[0]), abs(roi_x[-1])) + cfg.medium_margin
-    half_columns = math.ceil(half_width / spacing - _CELL_COUNT_TOLERANCE)
-    last_row = math.ceil((roi_z[-1] + cfg.medium_margin) / spacing - _CELL_COUNT_TOLERANCE)
+    half_columns = math.ceil(half_width / spacing - CELL_COUNT_TOLERANCE)
+    last_row = math.ceil((roi_z[-1] + cfg.medium_margin) / spacing - CELL_COUNT_TOLERANCE)
     return Grid2D(
         shape=(last_row + 1, 2 * half_columns + 1),
         spacing=spacing,

@@ -53,7 +53,7 @@ def test_e_ct_008_kernel_effect(small_cfg):
 
     shell_hu, noise_std = {}, {}
     for kernel in ("ramp", "hann"):
-        cfg = dataclasses.replace(small_cfg, kernel=kernel, slab_z_range=None)
+        cfg = dataclasses.replace(small_cfg, kernel=kernel, slab_z_from_center=None)
         clean_cfg = dataclasses.replace(cfg, photon_noise=False)
         clean = simulate_ct_fractions(fractions, grid, clean_cfg, SeedTree(SEED)).hu[..., 0]
         noisy = simulate_ct_fractions(fractions, grid, cfg, SeedTree(SEED)).hu[..., 0]

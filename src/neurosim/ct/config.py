@@ -225,6 +225,14 @@ class HuMappingConfig:
         "of the head being imaged; the default is the one of head.materials.MaterialParams "
         "(common.constants.ALPHA_POWER_DEFAULT).",
     )
+    bone_threshold_hu: float = field(
+        300.0,
+        gt=0.0,
+        doc="CT number from which a voxel counts as skull [HU]: voxels at or above it get "
+        "the bone absorption law and the bone label of the CT-derived medium, voxels below "
+        "it are soft tissue or water. 300 HU is the skull threshold of Yaakub et al. 2023 "
+        "(arXiv:2209.12031); assumed, to verify.",
+    )
 
     def __post_init__(self) -> None:
         for name in (
@@ -283,11 +291,13 @@ class CtConfig:
     )
     geometry: FanBeamGeometry = field(default_factory=FanBeamGeometry, doc="Fan-beam geometry.")
     kernel: Kernel = field("ramp", doc="Reconstruction kernel (apodisation of the ramp filter).")
-    slab_z_range: Optional[tuple[float, float]] = field(
+    slab_z_from_center: Optional[tuple[float, float]] = field(
         (-0.004, 0.004),
-        doc="Head-frame z interval [m]; the axial slices whose centres lie in it are "
-        "scanned. None scans every slice of the head. Default: an 8 mm slab at the "
-        "head centre; the pipeline should centre it on the imaging plane.",
+        doc="Axial extent of the scan: a z interval (low, high) measured from the centre "
+        "of the z extent of the scanned grid [m]. The slices whose centres lie in it are "
+        "scanned. It is relative to the grid, not a head-frame coordinate, so one setting "
+        "serves a whole head and a box region placed anywhere. None scans every slice of "
+        "the grid. Default: an 8 mm slab around the middle of the volume; modelling choice.",
     )
     photon_noise: bool = field(True, doc="Poisson photon noise on or off (ROADMAP D-005).")
     noise_scale: float = field(
@@ -336,8 +346,9 @@ class CtConfig:
             raise ValueError(
                 f"monoenergetic_kev must be below kvp, got {self.monoenergetic_kev} >= {self.kvp}"
             )
-        if self.slab_z_range is not None and self.slab_z_range[1] < self.slab_z_range[0]:
-            raise ValueError(f"slab_z_range must be (low, high), got {self.slab_z_range}")
+        slab = self.slab_z_from_center
+        if slab is not None and slab[1] < slab[0]:
+            raise ValueError(f"slab_z_from_center must be (low, high), got {slab}")
         if self.calibration_phantom_diameter >= 2.0 * self.geometry.fov_radius:
             raise ValueError(
                 "calibration_phantom_diameter must be smaller than the scan field of view "

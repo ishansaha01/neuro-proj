@@ -37,19 +37,24 @@ for the phase error of the k-space scheme (it sets the choice of `cfl`),
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import functools
 import logging
+import multiprocessing
+import os
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from typing import TypeVar
 
 import numpy as np
 
 from neurosim.common.config import to_dict
 from neurosim.common.constants import C_REF, RHO_WATER
 from neurosim.common.grid import Grid2D
+from neurosim.common.units import np_to_db
 from neurosim.fus.backends.config import KWaveConfig
 from neurosim.fus.backends.fullwave_plan import (
     FullWavePlan,
@@ -67,6 +72,18 @@ logger = logging.getLogger(__name__)
 
 # Final part of a recording inspected for pressure that has not died away [fraction of its length].
 _TAIL_FRACTION = 0.05
+# Environment variables the numerical libraries (OpenMP, OpenBLAS, MKL, Accelerate, numexpr)
+# read when they are loaded, to size their thread pools.
+_THREAD_VARIABLES = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+)
+
+Item = TypeVar("Item")
+Result = TypeVar("Result")
 
 
 @dataclass(frozen=True)
@@ -100,7 +117,7 @@ def _tail_level_db(recording: np.ndarray) -> float:
     if not np.any(audible):
         return -np.inf
     with np.errstate(divide="ignore"):
-        return float(20.0 * np.log10(np.max(tail[audible] / peak[audible])))
+        return float(np_to_db(np.log(np.max(tail[audible] / peak[audible]))))
 
 
 def _element_spectra(problem: _Problem, element: int) -> tuple[np.ndarray, np.ndarray, float]:
@@ -142,6 +159,51 @@ def _element_spectra(problem: _Problem, element: int) -> tuple[np.ndarray, np.nd
     return spectra[:, at_roi], spectra[:, at_elements].mean(axis=-1), _tail_level_db(recording)
 
 
+@contextlib.contextmanager
+def _single_threaded_children() -> Iterator[None]:
+    """Give processes started inside the block numerical libraries with one thread each.
+
+    The libraries size their thread pools from `_THREAD_VARIABLES` when they are
+    loaded, and a started process loads them (with numpy) before it runs any of
+    our code, so the variables cannot be set from inside the child (a pool
+    initializer is too late). They are set to 1 in this process's environment,
+    which a child inherits when it is started, and restored on exit. The thread
+    pools of this process are already built and do not change.
+    """
+    saved = {name: os.environ.get(name) for name in _THREAD_VARIABLES}
+    os.environ.update(dict.fromkeys(_THREAD_VARIABLES, "1"))
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                del os.environ[name]
+            else:
+                os.environ[name] = value
+
+
+def _map_in_worker_processes(
+    function: Callable[[Item], Result], items: Iterable[Item], workers: int
+) -> Iterator[Result]:
+    """Yield `function(item)` for every item, in order, computed on `workers` processes.
+
+    The processes are started with the ``spawn`` method on every platform (the
+    default on Windows and macOS; the Linux default is another one), so a worker
+    never inherits the memory, locks or thread state of this process, and the
+    same code path runs everywhere. Each worker is single-threaded
+    (`_single_threaded_children`): without that, `workers` processes would each
+    start one thread per core. A spawned worker imports the calling script and
+    this package again: that costs a few seconds once per worker, and the script
+    needs the usual ``if __name__ == "__main__":`` guard.
+    """
+    context = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
+        # The executor starts its workers while the tasks are submitted, inside `map`.
+        with _single_threaded_children():
+            results = pool.map(function, items)
+        yield from results
+
+
 def _all_element_spectra(problem: _Problem) -> Iterator[tuple[np.ndarray, np.ndarray, float]]:
     """Yield `_element_spectra` for every element in order, on `cfg.n_workers` processes."""
     n_elements = problem.transducer.n_elements
@@ -150,8 +212,7 @@ def _all_element_spectra(problem: _Problem) -> Iterator[tuple[np.ndarray, np.nda
     if workers == 1:
         yield from map(run, range(n_elements))
         return
-    with ProcessPoolExecutor(max_workers=workers) as pool:
-        yield from pool.map(run, range(n_elements))
+    yield from _map_in_worker_processes(run, range(n_elements), workers)
 
 
 def _reference_spectra(problem: _Problem) -> tuple[np.ndarray, np.ndarray]:
@@ -221,7 +282,7 @@ def _check_reference_level(reference: np.ndarray, freqs: np.ndarray, cfg: KWaveC
         cfg: backend settings (`min_reference_level_db`).
     """
     magnitude = np.abs(reference).reshape(freqs.size, -1)
-    level_db = 20.0 * np.log10(magnitude.min(axis=1) / magnitude.max(axis=1))
+    level_db = np_to_db(np.log(magnitude.min(axis=1) / magnitude.max(axis=1)))
     worst = int(np.argmin(level_db))
     if level_db[worst] < cfg.min_reference_level_db:
         raise ValueError(
@@ -286,6 +347,8 @@ def fullwave_bank(
     Returns:
         `GreensBank` with B complex64 of shape (nf, n_elements, nz_roi, nx_roi),
         `static_fmc` complex64 of shape (nf, n_elements, n_elements) and `c_ref = C_REF`.
+        The bank, `meta` included, is a function of the arguments alone: the measured
+        run time is logged (INFO), not stored, so a saved bank is byte-reproducible.
     """
     started = time.perf_counter()
     plan = build_plan(medium, transducer, roi, freqs, cfg)
@@ -338,6 +401,11 @@ def fullwave_bank(
     ].mean(axis=-1)
     separation = np.abs(np.arange(n_elements)[:, None] - np.arange(n_elements)[None, :])
     static_fmc = (received - reference_received[:, separation]) / source_factor[:, None, None]
+    logger.info(
+        "full-wave bank computed in %.1f s (estimated %.1f s)",
+        time.perf_counter() - started,
+        cost["run_time_s"],
+    )
 
     return GreensBank(
         freqs=freqs,
@@ -350,7 +418,6 @@ def fullwave_bank(
         meta={
             "config": to_dict(cfg),
             "cost_estimate": cost,
-            "run_time_s": time.perf_counter() - started,
             "medium_grid_shape": plan.medium_shape,
             "reference_grid_shape": layout.shape,
             "pml_points": plan.pml,

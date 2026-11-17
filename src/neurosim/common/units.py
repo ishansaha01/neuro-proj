@@ -18,6 +18,8 @@ _DB_PER_NP = 20.0 / math.log(10.0)
 _CM_PER_M = 100.0
 _HZ_PER_MHZ = 1.0e6
 _HU_PER_UNIT_CONTRAST = 1000.0
+# Binary prefix: 1 GiB = 2**30 bytes (IEC 80000-13).
+_BYTES_PER_GIB = 2**30
 
 # What a conversion returns: a Python or numpy scalar, or an array.
 Value = float | np.ndarray
@@ -93,6 +95,14 @@ def mu_from_hu(hu: ArrayLike, mu_water: ArrayLike, mu_air: ArrayLike) -> Value:
     """
     mu_water = _operand(mu_water)
     return mu_water + _operand(hu) * (mu_water - _operand(mu_air)) / _HU_PER_UNIT_CONTRAST
+
+
+def bytes_to_gib(n_bytes: ArrayLike) -> Value:
+    """Convert a memory or file size from bytes to gibibytes (1 GiB = 2**30 bytes).
+
+    n_bytes: size [bytes] -> [GiB].
+    """
+    return _operand(n_bytes) / _BYTES_PER_GIB
 
 
 def wavelength(c: ArrayLike, f: ArrayLike) -> Value:

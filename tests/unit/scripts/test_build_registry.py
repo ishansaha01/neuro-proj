@@ -1,6 +1,8 @@
 import json
 
+from neurosim.common import evalkit
 from neurosim.common.evalkit import EvalSpec
+from scripts import build_registry
 from scripts.build_registry import HEADER, load_results, render_registry
 
 
@@ -47,7 +49,32 @@ def test_render_registry_lists_every_eval_sorted_with_its_status():
 
 def test_load_results_reads_result_files_by_id(tmp_path):
     record = {"id": "E-CT-001", "value": 0.5, "passed": True, "note": "", "git_commit": "unknown"}
-    (tmp_path / "E-CT-001.json").write_text(json.dumps(record))
-    (tmp_path / "notes.txt").write_text("ignored")
+    (tmp_path / "E-CT-001.json").write_text(json.dumps(record), encoding="utf-8")
+    (tmp_path / "notes.txt").write_text("ignored", encoding="utf-8")
     assert load_results(tmp_path) == {"E-CT-001": record}
     assert load_results(tmp_path / "missing") == {}
+
+
+def test_main_reads_the_evalkit_results_dir_and_writes_unix_line_ends(
+    tmp_path, monkeypatch, capsys
+):
+    """`main` on a stand-in checkout: results from `evalkit.RESULTS_DIR`, registry as bytes."""
+    results_dir = tmp_path / "elsewhere"
+    results_dir.mkdir()
+    record = {"id": "E-CT-001", "value": 0.5, "passed": True, "note": "", "git_commit": "unknown"}
+    (results_dir / "E-CT-001.json").write_text(json.dumps(record), encoding="utf-8")
+    (tmp_path / "evals").mkdir()
+    specs = {"E-CT-001": spec("E-CT-001", claim="µ of water"), "E-CT-002": spec("E-CT-002")}
+    monkeypatch.setattr(evalkit, "REGISTRY", specs)
+    monkeypatch.setattr(evalkit, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(build_registry, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(build_registry, "EVALS_DIR", tmp_path / "evals")
+    monkeypatch.setattr(build_registry, "REGISTRY_PATH", tmp_path / "evals" / "REGISTRY.md")
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    build_registry.main()
+
+    assert "2 evals (1 passing, 0 failing, 1 not built)" in capsys.readouterr().out
+    written = (tmp_path / "evals" / "REGISTRY.md").read_bytes()
+    assert written == render_registry(specs, {"E-CT-001": record}).encode("utf-8")
+    assert "µ of water".encode("utf-8") in written and b"\r" not in written

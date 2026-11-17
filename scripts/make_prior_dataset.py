@@ -14,14 +14,13 @@ import time
 from neurosim.common.config import from_dict, load_yaml, to_dict
 from neurosim.common.io import provenance, save_bundle
 from neurosim.common.seeding import SeedTree
+from neurosim.common.units import bytes_to_gib
 from neurosim.recon.cbv_images import (
     estimate_memory_bytes,
     estimate_runtime_seconds,
     sample_cbv_images,
 )
 from neurosim.recon.train import PriorConfig
-
-_BYTES_PER_GIB = 2**30
 
 
 def main(argv: list[str]) -> int:
@@ -38,7 +37,7 @@ def main(argv: list[str]) -> int:
         f"prior data set: {cfg.n_heads} heads x {cfg.planes_per_head} planes = {n_images} "
         f"images of {cfg.pixel_grid.n} x {cfg.pixel_grid.n} pixels; about "
         f"{estimate_runtime_seconds(cfg):.0f} s and "
-        f"{estimate_memory_bytes(cfg) / _BYTES_PER_GIB:.2f} GiB peak memory"
+        f"{bytes_to_gib(estimate_memory_bytes(cfg)):.2f} GiB peak memory"
     )
     start = time.perf_counter()
     arrays = sample_cbv_images(cfg, SeedTree(args.seed))

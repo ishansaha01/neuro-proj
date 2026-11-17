@@ -11,11 +11,10 @@ import sys
 
 from neurosim.common.config import from_dict, load_yaml
 from neurosim.common.seeding import SeedTree
+from neurosim.common.units import bytes_to_gib
 from neurosim.head.config import HeadConfig
 from neurosim.head.generate import estimate_memory_bytes, estimate_runtime_seconds, generate_head
 from neurosim.head.io import save_head
-
-_BYTES_PER_GIB = 2**30
 
 
 def main(argv: list[str]) -> int:
@@ -29,7 +28,7 @@ def main(argv: list[str]) -> int:
     cfg = from_dict(HeadConfig, load_yaml(args.config))
     print(
         f"head ({cfg.grid.region}, {cfg.grid.spacing * 1e3:g} mm voxels): about "
-        f"{estimate_memory_bytes(cfg) / _BYTES_PER_GIB:.2f} GiB peak memory and "
+        f"{bytes_to_gib(estimate_memory_bytes(cfg)):.2f} GiB peak memory and "
         f"{estimate_runtime_seconds(cfg):.0f} s"
     )
     head = generate_head(cfg, SeedTree(args.seed))

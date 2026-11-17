@@ -5,9 +5,12 @@ from __future__ import annotations
 import numpy as np
 
 from neurosim.common.evalkit import REGISTRY, eval_case, report
-from neurosim.ct.acoustics import BONE_THRESHOLD_HU
+from neurosim.ct.config import HuMappingConfig
 
 EVAL_ID = "E-DATA-002"
+# Bone threshold of the CT-derived medium [HU]: the evals scan with configs/ct_default.yaml,
+# which keeps the default of the HU mapping.
+BONE_THRESHOLD_HU = HuMappingConfig().bone_threshold_hu
 # One voxel of the CT slab at the default settings [m].
 MAX_INTERFACE_ERROR = 0.5e-3
 

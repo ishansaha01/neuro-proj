@@ -80,7 +80,8 @@ def test_report_writes_the_result_file():
     eval_case(id="E-CT-004", **SPEC_TEXT)(lambda: None)
     report("E-CT-004", 0.25, passed=True, note="120 kVp")
 
-    result = json.loads((evalkit.RESULTS_DIR / "E-CT-004.json").read_text())
+    written = (evalkit.RESULTS_DIR / "E-CT-004.json").read_bytes()
+    result = json.loads(written.decode("utf-8"))
     assert result == {
         "id": "E-CT-004",
         "value": 0.25,
@@ -88,6 +89,31 @@ def test_report_writes_the_result_file():
         "note": "120 kVp",
         "git_commit": git_commit(),
     }
+    # The same bytes on every operating system: UTF-8, "\n" line ends.
+    assert written.endswith(b"}\n") and b"\r" not in written
+
+
+def test_results_dir_follows_the_variable_then_the_checkout_then_the_working_directory(
+    monkeypatch, tmp_path
+):
+    checkout = tmp_path / "checkout"
+    (checkout / "evals").mkdir(parents=True)
+    site_packages = tmp_path / "venv" / "lib"
+    site_packages.mkdir(parents=True)
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+
+    monkeypatch.delenv(evalkit.RESULTS_DIR_VARIABLE, raising=False)
+    assert evalkit.resolve_results_dir(checkout) == checkout / "evals" / "results"
+    # A non-editable install: no evals/ folder next to the package.
+    assert evalkit.resolve_results_dir(site_packages) == work / "evals" / "results"
+
+    monkeypatch.setenv(evalkit.RESULTS_DIR_VARIABLE, str(tmp_path / "chosen"))
+    assert evalkit.resolve_results_dir(checkout) == tmp_path / "chosen"
+    assert evalkit.resolve_results_dir(site_packages) == tmp_path / "chosen"
+    monkeypatch.setenv(evalkit.RESULTS_DIR_VARIABLE, "")
+    assert evalkit.resolve_results_dir(checkout) == checkout / "evals" / "results"
 
 
 def test_report_accepts_several_named_values():

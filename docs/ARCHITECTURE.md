@@ -28,7 +28,9 @@ number sourced) apply to everything below.
   calls, no unseeded generators, no `torch.manual_seed` outside `recon/`'s single
   seeding helper (which derives its seed from the tree).
 - **Purity:** physics functions take arrays and parameters and return arrays.
-  File I/O, plotting and config loading stay in `scripts/` and `common/io.py`.
+  File I/O stays in `scripts/`, `common/io.py` and each package's own `io.py`
+  (plus `data/sweep.py`, which writes datasets); plotting and config loading stay
+  in `scripts/`.
 
 ## 2. Package layout and ownership
 
@@ -110,7 +112,9 @@ the ratio of the one-way transfer function from array element `e` to ROI point
 `r` in the real medium to that in a homogeneous reference (`C_REF`, no
 absorption). `B` varies slowly in `r`, so it is stored on a coarse ROI grid and
 interpolated; `G_ref` is analytic (2D: Hankel function) and evaluated exactly at
-any point. By reciprocity the same `B` serves transmit and receive.
+any point. By reciprocity the same `B` serves transmit and receive, up to the
+constant density ratio between the array face and the scatterer (E-FUS-020),
+which the synthesis folds into the scatterer amplitude.
 
 Backends behind one interface `compute_bank(medium, transducer, roi, freqs, cfg) -> GreensBank`:
 
@@ -146,7 +150,9 @@ Two fidelities produce data, chosen in the config:
 - `scatterer`: explicit moving blood scatterers and tissue scatterers, frame by
   frame, plus static skull clutter and electronic noise. Physically explicit; slow.
 - `statistical`: `PD = H @ cbv` with gamma speckle (shape set by the ensemble
-  length) and a noise floor. Fast; validated against `scatterer` by an eval.
+  length) and a noise floor. Fast. Its *mean* is validated against `scatterer`
+  (E-FUS-014, E-DATA-009); its speckle *variance* is checked by E-FUS-022 and is
+  a known weak point (ROADMAP D-018).
 
 ## 6. `ct`
 
@@ -160,16 +166,18 @@ are energy-independent, so each material is projected once) -> polyenergetic
 Beer–Lambert on the sinogram -> Poisson noise -> filtered back-projection with a
 choice of kernel -> HU calibration with water and air.
 
-`hu_to_acoustic(hu, mapping) -> (sound_speed, density, attenuation)` is the
-clinical linear map (Aubry 2003, Marquet 2009). `sample_hu_mapping(tree, bounds)`
-draws its constants within published error bounds (Webb 2018). This CT-derived
+`hu_to_acoustic(hu, mapping, bone_threshold_hu) -> (sound_speed, density,
+attenuation)` is the clinical linear map (Aubry 2003, Marquet 2009); the bone
+threshold is a config value (`HuMappingConfig.bone_threshold_hu`). `sample_hu_mapping(tree, cfg, *sub)`
+draws its constants within the bounds in `cfg.hu_mapping` (Webb 2018). This CT-derived
 skull is the prior used by `recon`.
 
 ## 7. `data` and `recon`
 
-- `data.pipeline.run(config) -> Run`: head -> plane -> banks (skull and
-  no-skull) -> fUS data (both) -> CT -> CT-derived skull. One config, one seed,
-  one bundle on disk.
+- `data.pipeline.run(cfg, root_seed) -> (Scene, TrialSet)`: head -> plane ->
+  banks (skull and no-skull) -> CT -> CT-derived skull -> operators -> trials.
+  One config, one seed, one bundle on disk (`data.io.save_run`). `Scene` and
+  `TrialSet` (`data/types.py`) are the contract `recon` consumes.
 - `data.sweep`: grids or random sweeps over skull seed, frequency, probe pose,
   target region and noise switches; writes the paired dataset.
 - `recon`: baselines (uncorrected DAS, CT-corrected DAS, true-skull DAS, no

@@ -1,13 +1,17 @@
 import hashlib
 import re
+import shutil
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 import neurosim
+from neurosim.common import io
 from neurosim.common.config import config_hash, dump_yaml, field
-from neurosim.common.io import git_commit, load_bundle, provenance, save_bundle
+from neurosim.common.io import git_commit, load_attrs, load_bundle, provenance, save_bundle
 from neurosim.common.seeding import SeedTree
 
 
@@ -101,9 +105,100 @@ def test_unsupported_inputs_are_rejected(tmp_path):
     assert not path.exists()
 
 
-def test_git_commit_is_a_hash_or_unknown():
+def test_load_attrs_reads_the_attributes_without_the_arrays(tmp_path, monkeypatch):
+    path = tmp_path / "bundle.h5"
+    save_bundle(path, demo_arrays(), DEMO_ATTRS)
+    expected = load_bundle(path)[1]
+
+    def no_array_read(dataset, key):
+        raise AssertionError(f"dataset {dataset.name} was read")
+
+    monkeypatch.setattr(io.h5py.Dataset, "__getitem__", no_array_read)
+    assert load_attrs(path) == expected
+
+    save_bundle(tmp_path / "bare.h5", {"x": np.zeros(3)})
+    assert load_attrs(tmp_path / "bare.h5") == {}
+    (tmp_path / "broken.h5").write_bytes(b"not an HDF5 file")
+    with pytest.raises(OSError):
+        load_attrs(tmp_path / "broken.h5")
+
+
+def test_git_commit_is_a_hash_with_optional_dirty_suffix_or_unknown():
     commit = git_commit()
-    assert commit == "unknown" or re.fullmatch(r"[0-9a-f]{40}", commit)
+    assert commit == "unknown" or re.fullmatch(r"[0-9a-f]{40}(-dirty)?", commit)
+
+
+def _run_git(directory: Path, *arguments: str) -> str:
+    """Run git in `directory` with a fixed identity and no user or system configuration."""
+    result = subprocess.run(
+        ["git", "-C", str(directory), "-c", "user.name=test", "-c", "user.email=test@example.org",
+         "-c", "commit.gpgsign=false", *arguments],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    return result.stdout.strip()
+
+
+@pytest.fixture
+def package_checkout(tmp_path, monkeypatch) -> Path:
+    """A git repository with one commit that tracks a stand-in package directory.
+
+    `git_commit` is pointed at that directory; the fixture returns the repository root.
+    """
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
+    repo = tmp_path / "checkout"
+    package = repo / "src" / "package"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("VERSION = 1\n", encoding="utf-8")
+    (repo / "notes.txt").write_text("tracked\n", encoding="utf-8")
+    _run_git(repo, "init", "--quiet")
+    _run_git(repo, "add", ".")
+    _run_git(repo, "commit", "--quiet", "-m", "first")
+    monkeypatch.setattr(io, "_PACKAGE_DIR", package.resolve())
+    return repo
+
+
+def test_git_commit_of_a_clean_checkout_is_its_head(package_checkout):
+    head = _run_git(package_checkout, "rev-parse", "HEAD")
+    assert git_commit() == head
+    # Untracked files do not make the tree dirty.
+    (package_checkout / "scratch.txt").write_text("untracked\n", encoding="utf-8")
+    assert git_commit() == head
+
+
+def test_git_commit_flags_uncommitted_changes_to_tracked_files(package_checkout):
+    head = _run_git(package_checkout, "rev-parse", "HEAD")
+    # A change anywhere in the work tree counts, staged or not.
+    (package_checkout / "notes.txt").write_text("edited\n", encoding="utf-8")
+    assert git_commit() == f"{head}-dirty"
+    _run_git(package_checkout, "add", "notes.txt")
+    assert git_commit() == f"{head}-dirty"
+    _run_git(package_checkout, "commit", "--quiet", "-m", "second")
+    assert git_commit() == _run_git(package_checkout, "rev-parse", "HEAD") != head
+
+
+def test_git_commit_is_unknown_outside_the_repository_of_the_package(
+    package_checkout, tmp_path, monkeypatch
+):
+    # Installed (not tracked) inside the work tree of an unrelated repository.
+    installed = package_checkout / "venv" / "site-packages" / "package"
+    installed.mkdir(parents=True)
+    (installed / "__init__.py").write_text("VERSION = 1\n", encoding="utf-8")
+    monkeypatch.setattr(io, "_PACKAGE_DIR", installed.resolve())
+    assert git_commit() == "unknown"
+
+    # Not inside any git work tree. The search for a repository stops at tmp_path,
+    # wherever the temporary directory itself lives.
+    outside = tmp_path / "plain" / "package"
+    outside.mkdir(parents=True)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.setattr(io, "_PACKAGE_DIR", outside.resolve())
+    assert git_commit() == "unknown"
+
+
+def test_git_commit_is_unknown_without_git(package_checkout, monkeypatch):
+    monkeypatch.setenv("PATH", "")
+    assert git_commit() == "unknown"
 
 
 def test_provenance_fields_and_storage(tmp_path):

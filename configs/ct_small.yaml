@@ -6,6 +6,6 @@ geometry:
   n_views: 240
   n_detectors: 192
   detector_pitch: 2.1e-3
-slab_z_range: [-0.004, 0.004]
+slab_z_from_center: [-0.004, 0.004]
 calibration_phantom_diameter: 0.16
 max_chunk_samples: 2000000

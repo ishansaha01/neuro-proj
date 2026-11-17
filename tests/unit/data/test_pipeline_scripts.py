@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
+
 import yaml
 
+from neurosim.common import io as common_io
 from neurosim.common.config import dump_yaml
 from neurosim.data.io import load_run, media_paths
 from neurosim.data.sweep import INDEX_NAME, scene_file
@@ -56,3 +59,26 @@ def test_make_dataset_estimates_then_generates_the_requested_scenes(tmp_path, qu
     assert sorted(path.name for path in out_dir.iterdir()) == [INDEX_NAME, scene_file(1)]
     scene, _ = load_run(out_dir / scene_file(1))
     assert scene.meta["sweep"]["index"] == 1 and "probe" in scene.meta["sweep"]["varied"]
+
+
+def test_make_dataset_keeps_bundles_of_another_commit_on_request(
+    tmp_path, quick_cfg, capsys, monkeypatch
+):
+    sweep = {"base": yaml.safe_load(dump_yaml(quick_cfg)), "n_scenes": 1}
+    config_path = tmp_path / "sweep.yaml"
+    config_path.write_text(yaml.safe_dump(sweep), encoding="utf-8")
+    out_dir = tmp_path / "dataset"
+    arguments = ["--config", str(config_path), "--seed", "9", "--out", str(out_dir)]
+    bundle = out_dir / scene_file(0)
+
+    monkeypatch.setattr(common_io, "git_commit", lambda: "commit-a")
+    assert make_dataset.main(arguments) == 0
+    assert "kept from another git commit" not in capsys.readouterr().out
+    first = bundle.stat().st_mtime_ns
+
+    monkeypatch.setattr(common_io, "git_commit", lambda: "commit-b")
+    assert make_dataset.main([*arguments, "--keep-existing"]) == 0
+    assert "kept from another git commit (see index.json): scenes [0]" in capsys.readouterr().out
+    assert bundle.stat().st_mtime_ns == first
+    index = json.loads((out_dir / INDEX_NAME).read_text(encoding="utf-8"))
+    assert index["git_commit"] == "commit-b" and index["scenes"][0]["git_commit"] == "commit-a"

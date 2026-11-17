@@ -11,12 +11,11 @@ import sys
 
 from neurosim.common.config import from_dict, load_yaml
 from neurosim.common.seeding import SeedTree
+from neurosim.common.units import bytes_to_gib
 from neurosim.ct.config import CtConfig
 from neurosim.ct.io import save_ct
 from neurosim.ct.simulate import estimate_cost, simulate_ct
 from neurosim.head.io import load_head
-
-_BYTES_PER_GIB = 2**30
 
 
 def main(argv: list[str]) -> int:
@@ -34,7 +33,7 @@ def main(argv: list[str]) -> int:
     print(
         f"CT scan: {cost['n_slices']:.0f} slices, {cost['rays']:.3g} rays, "
         f"{cost['samples']:.3g} ray samples, "
-        f"about {cost['memory_bytes'] / _BYTES_PER_GIB:.2f} GiB and {cost['time_s']:.0f} s"
+        f"about {bytes_to_gib(cost['memory_bytes']):.2f} GiB and {cost['time_s']:.0f} s"
     )
     ct = simulate_ct(head, cfg, SeedTree(args.seed))
     save_ct(args.out, ct, cfg, args.seed)

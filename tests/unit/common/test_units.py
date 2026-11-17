@@ -54,6 +54,12 @@ def test_mu_from_hu_hand_value_and_round_trip():
     )
 
 
+def test_bytes_to_gib_hand_values():
+    assert units.bytes_to_gib(2**30) == 1.0
+    assert units.bytes_to_gib(1.5 * 2**30) == 1.5
+    np.testing.assert_array_equal(units.bytes_to_gib(np.array([0, 2**29])), [0.0, 0.5])
+
+
 def test_wavelength_hand_value():
     # 1540 m/s at 2 MHz: 0.77 mm.
     assert units.wavelength(1540.0, 2.0e6) == pytest.approx(7.7e-4, rel=1e-12)

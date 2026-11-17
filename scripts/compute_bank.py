@@ -19,21 +19,12 @@ import numpy as np
 from neurosim.common.config import field, from_dict, load_yaml
 from neurosim.common.grid import Grid2D
 from neurosim.common.io import load_bundle, provenance
+from neurosim.common.units import bytes_to_gib
 from neurosim.fus.backends import BackendConfig, compute_bank, estimate_cost
+from neurosim.fus.config import RoiConfig
 from neurosim.fus.io import save_bank
 from neurosim.fus.types import Transducer
 from neurosim.head.io import plane_medium_from_bundle
-
-_BYTES_PER_GIB = 2**30
-
-
-@dataclass(frozen=True)
-class RoiConfig:
-    """Coarse grid the bank is stored on."""
-
-    x_range: tuple[float, float] = field(doc="Lateral range of the ROI point centres [m].")
-    z_range: tuple[float, float] = field(gt=0.0, doc="Depth range of the ROI point centres [m].")
-    spacing: float = field(gt=0.0, doc="ROI grid spacing [m].")
 
 
 @dataclass(frozen=True)
@@ -50,7 +41,10 @@ class BankJob:
     """One bank computation: array, ROI, frequencies and backend."""
 
     transducer: Transducer = field(doc="The array (see `neurosim.fus.types.Transducer`).")
-    roi: RoiConfig = field(doc="ROI grid.")
+    roi: RoiConfig = field(
+        doc="Coarse grid the bank is stored on (`neurosim.fus.config.RoiConfig`; keys that "
+        "are left out take its defaults)."
+    )
     frequencies: FrequencyConfig = field(doc="Frequency list.")
     backend: BackendConfig = field(default_factory=BackendConfig, doc="Backend and its settings.")
 
@@ -79,7 +73,7 @@ def main(argv: list[str]) -> int:
     print(
         f"Green's bank ({job.backend.backend}): {cost['n_simulations']} simulations of "
         f"{cost['grid_points']} grid points x {cost['time_steps']} time steps, "
-        f"about {cost['memory_bytes'] / _BYTES_PER_GIB:.2f} GiB and {cost['run_time_s']:.0f} s"
+        f"about {bytes_to_gib(cost['memory_bytes']):.2f} GiB and {cost['run_time_s']:.0f} s"
     )
     if args.estimate_only:
         return 0

@@ -56,7 +56,7 @@ Things to know before trusting a number:
 
 ## Getting started
 
-Python 3.10 or later. From the repository root:
+Python 3.11 or later. From the repository root:
 
 ```
 # with conda (Windows, macOS, Linux)

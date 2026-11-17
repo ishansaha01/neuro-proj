@@ -22,6 +22,7 @@ registered specs and the latest results into ``evals/REGISTRY.md``.
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -37,8 +38,31 @@ F = TypeVar("F", bound=Callable[..., object])
 AREAS: tuple[str, ...] = ("HEAD", "FUS", "CT", "DATA", "RECON", "COMMON")
 _ID_PATTERN = re.compile(rf"E-({'|'.join(AREAS)})-\d{{3}}")
 
-# Result files live in <repo>/evals/results/ (this file is <repo>/src/neurosim/common/evalkit.py).
-RESULTS_DIR: Path = Path(__file__).resolve().parents[3] / "evals" / "results"
+# Environment variable that names the directory of the result files.
+RESULTS_DIR_VARIABLE = "NEUROSIM_EVAL_RESULTS"
+# In a source checkout this file is <repo>/src/neurosim/common/evalkit.py.
+_CHECKOUT_ROOT = Path(__file__).resolve().parents[3]
+
+
+def resolve_results_dir(checkout_root: Path = _CHECKOUT_ROOT) -> Path:
+    """Directory the eval result files are written to and read from.
+
+    In this order: the environment variable ``NEUROSIM_EVAL_RESULTS`` if it is
+    set and not empty; ``<repo>/evals/results`` when the package is imported
+    from a source checkout (`checkout_root` has an ``evals`` folder);
+    otherwise ``evals/results`` under the current working directory (a
+    non-editable install, where `checkout_root` is next to ``site-packages``).
+    """
+    configured = os.environ.get(RESULTS_DIR_VARIABLE)
+    if configured:
+        return Path(configured)
+    if (checkout_root / "evals").is_dir():
+        return checkout_root / "evals" / "results"
+    return Path.cwd() / "evals" / "results"
+
+
+# Resolved once, when this module is imported.
+RESULTS_DIR: Path = resolve_results_dir()
 
 
 @dataclass(frozen=True)
@@ -156,7 +180,7 @@ def report(eval_id: str, value: float | Mapping[str, float], passed: bool, note:
     }
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     (RESULTS_DIR / f"{eval_id}.json").write_text(
-        json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
     )
     if not passed:
         raise AssertionError(

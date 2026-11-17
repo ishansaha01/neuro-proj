@@ -2,7 +2,8 @@
 
 Usage: ``python scripts/run_evals.py [area ...]`` where an area is one of the
 directories under ``evals/`` (``common``, ``head``, ``fus``, ...). Without
-arguments every eval runs. Results go to ``evals/results/``; run
+arguments every eval runs. Results go to ``evals/results/`` (or the directory
+named by the environment variable ``NEUROSIM_EVAL_RESULTS``); run
 ``scripts/build_registry.py`` afterwards to refresh ``evals/REGISTRY.md``.
 """
 

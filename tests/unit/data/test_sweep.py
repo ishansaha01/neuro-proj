@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import replace
 
 import numpy as np
 import pytest
 
+from neurosim.common import io as common_io
 from neurosim.common.config import ConfigError, config_hash, from_dict, load_yaml
+from neurosim.common.io import git_commit, load_attrs
 from neurosim.common.seeding import SeedTree
 from neurosim.data.sweep import (
     INDEX_NAME,
@@ -100,8 +103,16 @@ def test_a_frequency_the_imaging_setup_cannot_hold_is_rejected_at_load(quick_cfg
 
 def test_index_lists_every_scene_and_is_written_to_the_directory(sweep_cfg, dataset):
     out_dir, index = dataset
-    assert index == sweep_index(sweep_cfg, ROOT_SEED)
-    assert json.loads((out_dir / INDEX_NAME).read_text(encoding="utf-8")) == index
+    # The index of the sweep, with the commit that produced each bundle filled in.
+    planned = sweep_index(sweep_cfg, ROOT_SEED)
+    assert [entry["git_commit"] for entry in planned["scenes"]] == [None, None]
+    for entry in planned["scenes"]:
+        entry["git_commit"] = git_commit()
+    assert index == planned and index["git_commit"] == git_commit()
+    written = (out_dir / INDEX_NAME).read_bytes()
+    assert json.loads(written.decode("utf-8")) == index
+    # The same bytes on every operating system.
+    assert written.endswith(b"}\n") and b"\r" not in written
     assert index["root_seed"] == ROOT_SEED and index["config_hash"] == config_hash(sweep_cfg)
     assert index["n_scenes"] == 2 and [entry["index"] for entry in index["scenes"]] == [0, 1]
     tree = SeedTree(ROOT_SEED)
@@ -110,6 +121,7 @@ def test_index_lists_every_scene_and_is_written_to_the_directory(sweep_cfg, data
         assert entry["file"] == scene_file(entry["index"]) and (out_dir / entry["file"]).exists()
         assert entry["seed_path"] == [entry["index"]] and entry["root_seed"] == ROOT_SEED
         assert entry["config_hash"] == config_hash(run) and entry["varied"] == varied
+        assert load_attrs(out_dir / entry["file"])["git_commit"] == entry["git_commit"]
 
 
 def test_load_dataset_yields_the_scenes_in_order(sweep_cfg, dataset):
@@ -132,15 +144,19 @@ def test_load_dataset_yields_the_scenes_in_order(sweep_cfg, dataset):
 
 def test_a_scene_alone_and_a_resumed_sweep_reproduce_the_files(sweep_cfg, dataset, tmp_path):
     out_dir, _ = dataset
-    run_sweep(sweep_cfg, ROOT_SEED, tmp_path, scenes=(1,))
+    lone = run_sweep(sweep_cfg, ROOT_SEED, tmp_path, scenes=(1,))
     assert not (tmp_path / scene_file(0)).exists()
     assert (tmp_path / scene_file(1)).read_bytes() == (out_dir / scene_file(1)).read_bytes()
+    # A scene without a bundle has no producing commit yet.
+    assert [entry["git_commit"] for entry in lone["scenes"]] == [None, git_commit()]
+    assert json.loads((tmp_path / INDEX_NAME).read_text(encoding="utf-8")) == lone
     with pytest.raises(FileNotFoundError, match="scene 0"):
         list(load_dataset(tmp_path))
 
-    # An unreadable bundle (an interrupted write) is generated again; a good one is kept.
+    # A bundle cut short (an interrupted write) is generated again; a good one is kept.
     kept = (tmp_path / scene_file(1)).stat().st_mtime_ns
-    (tmp_path / scene_file(0)).write_bytes(b"not an HDF5 file")
+    complete = (out_dir / scene_file(0)).read_bytes()
+    (tmp_path / scene_file(0)).write_bytes(complete[: len(complete) // 2])
     run_sweep(sweep_cfg, ROOT_SEED, tmp_path)
     assert (tmp_path / scene_file(1)).stat().st_mtime_ns == kept
     assert sorted(path.name for path in tmp_path.iterdir()) == sorted(
@@ -148,6 +164,39 @@ def test_a_scene_alone_and_a_resumed_sweep_reproduce_the_files(sweep_cfg, datase
     )
     for path in out_dir.iterdir():
         assert (tmp_path / path.name).read_bytes() == path.read_bytes()
+
+
+def test_bundles_of_another_commit_are_regenerated_unless_kept(
+    sweep_cfg, dataset, tmp_path, monkeypatch
+):
+    out_dir, original = dataset
+    for path in out_dir.iterdir():
+        shutil.copy2(path, tmp_path / path.name)
+    produced_by = original["git_commit"]
+    stamps = [(tmp_path / scene_file(index)).stat().st_mtime_ns for index in range(2)]
+    # The code moves on to another commit.
+    current = "0123456789abcdef0123456789abcdef01234567"
+    monkeypatch.setattr(common_io, "git_commit", lambda: current)
+
+    # Explicitly kept: nothing is generated, and the index names the commit of every scene.
+    kept = run_sweep(sweep_cfg, ROOT_SEED, tmp_path, keep_existing=True)
+    assert [(tmp_path / scene_file(index)).stat().st_mtime_ns for index in range(2)] == stamps
+    assert kept["git_commit"] == current
+    assert [entry["git_commit"] for entry in kept["scenes"]] == [produced_by, produced_by]
+    assert json.loads((tmp_path / INDEX_NAME).read_text(encoding="utf-8")) == kept
+
+    # By default the requested scene is generated again with the current code; the scene
+    # that was not requested stays, and stays listed with the commit that produced it.
+    resumed = run_sweep(sweep_cfg, ROOT_SEED, tmp_path, scenes=(0,))
+    assert (tmp_path / scene_file(0)).stat().st_mtime_ns != stamps[0]
+    assert (tmp_path / scene_file(1)).stat().st_mtime_ns == stamps[1]
+    assert [entry["git_commit"] for entry in resumed["scenes"]] == [current, produced_by]
+    assert load_attrs(tmp_path / scene_file(0))["git_commit"] == current
+    assert json.loads((tmp_path / INDEX_NAME).read_text(encoding="utf-8")) == resumed
+    # Only the recorded commit differs: the data of the scene are reproduced.
+    for first, second in zip(*(load_dataset(directory) for directory in (out_dir, tmp_path))):
+        np.testing.assert_array_equal(first[1].cbv, second[1].cbv)
+        assert first[0].meta == second[0].meta
 
 
 def test_a_directory_of_another_sweep_is_refused(sweep_cfg, dataset):

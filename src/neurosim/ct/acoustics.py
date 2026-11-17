@@ -25,12 +25,9 @@ from neurosim.ct.config import CtConfig, HuMappingConfig
 from neurosim.ct.types import HuMapping
 from neurosim.head.materials import power_law_prefactor
 
-# Voxels below this HU are soft tissue or water, not skull: the absorption law is
-# for bone only. 300 HU is the skull threshold of Yaakub et al. 2023
-# (arXiv:2209.12031); assumed, to verify.
-BONE_THRESHOLD_HU = 300.0
-# Absorption prefactor given to voxels below the threshold [dB/(cm MHz^y)]:
-# water-like, alpha_water = 0 in Yaakub et al. 2023, Table 1.
+# Absorption prefactor given to voxels below the bone threshold
+# (`HuMappingConfig.bone_threshold_hu`) [dB/(cm MHz^y)]: water-like, alpha_water = 0
+# in Yaakub et al. 2023, Table 1.
 SOFT_TISSUE_ALPHA0 = 0.0
 
 
@@ -104,17 +101,21 @@ def sample_hu_mapping(tree: SeedTree, cfg: CtConfig, *sub: int) -> HuMapping:
     )
 
 
-def hu_to_acoustic(hu: np.ndarray, mapping: HuMapping) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def hu_to_acoustic(
+    hu: np.ndarray, mapping: HuMapping, bone_threshold_hu: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Convert a CT image to acoustic property maps (module docstring equations).
 
     Sound speed and density follow the porosity everywhere, so HU <= 0 (soft
     tissue, water, air) gives the water end points. The absorption law applies
-    to bone voxels (HU >= `BONE_THRESHOLD_HU`); other voxels get
+    to bone voxels (HU >= ``bone_threshold_hu``); other voxels get
     `SOFT_TISSUE_ALPHA0`.
 
     Args:
         hu: CT numbers [HU], any shape.
         mapping: constants of the map.
+        bone_threshold_hu: CT number from which a voxel is bone [HU]
+            (``CtConfig.hu_mapping.bone_threshold_hu``).
 
     Returns:
         sound_speed [m/s], density [kg/m^3] and attenuation, the power-law
@@ -127,7 +128,7 @@ def hu_to_acoustic(hu: np.ndarray, mapping: HuMapping) -> tuple[np.ndarray, np.n
     density = porosity * mapping.rho_water + solid * mapping.rho_bone
     absorption_span = mapping.alpha_max - mapping.alpha_min
     bone_absorption = mapping.alpha_min + absorption_span * porosity**mapping.alpha_exponent
-    attenuation = np.where(hu >= BONE_THRESHOLD_HU, bone_absorption, SOFT_TISSUE_ALPHA0)
+    attenuation = np.where(hu >= bone_threshold_hu, bone_absorption, SOFT_TISSUE_ALPHA0)
     return (
         sound_speed.astype(np.float32),
         density.astype(np.float32),

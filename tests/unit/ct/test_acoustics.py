@@ -7,17 +7,18 @@ import dataclasses
 import numpy as np
 import pytest
 
+from neurosim.common.config import ConfigError, from_dict
 from neurosim.common.constants import BASIS_MATERIALS
 from neurosim.common.seeding import SeedTree
 from neurosim.common.units import db_cm_mhz_to_np_m, np_m_to_db_cm
 from neurosim.ct.acoustics import (
-    BONE_THRESHOLD_HU,
     SOFT_TISSUE_ALPHA0,
     hu_to_acoustic,
     nominal_hu_mapping,
     sample_hu_mapping,
 )
 from neurosim.ct.calibration import effective_hu
+from neurosim.ct.config import HuMappingConfig
 from neurosim.ct.types import HuMapping
 
 
@@ -53,7 +54,9 @@ def test_configured_hu_bone_overrides_the_scanner_model(small_cfg):
 def test_map_end_points_and_units(small_cfg):
     mapping = nominal_hu_mapping(small_cfg)
     hu = np.array([-1000.0, 0.0, 0.5 * mapping.hu_bone, mapping.hu_bone, 2.0 * mapping.hu_bone])
-    sound_speed, density, attenuation = hu_to_acoustic(hu, mapping)
+    sound_speed, density, attenuation = hu_to_acoustic(
+        hu, mapping, small_cfg.hu_mapping.bone_threshold_hu
+    )
     for values in (sound_speed, density, attenuation):
         assert values.shape == hu.shape and values.dtype == np.float32
     np.testing.assert_allclose(sound_speed, [1500.0, 1500.0, 2200.0, 2900.0, 2900.0])
@@ -66,10 +69,18 @@ def test_map_end_points_and_units(small_cfg):
 
 def test_absorption_law_applies_to_bone_voxels_only(small_cfg):
     mapping = nominal_hu_mapping(small_cfg)
-    below, above = hu_to_acoustic(
-        np.array([BONE_THRESHOLD_HU - 1.0, BONE_THRESHOLD_HU + 1.0]), mapping
-    )[2]
-    assert below == SOFT_TISSUE_ALPHA0 and above > mapping.alpha_min
+    # 300 HU: Yaakub et al. 2023, the default of the config.
+    assert small_cfg.hu_mapping.bone_threshold_hu == HuMappingConfig().bone_threshold_hu == 300.0
+    hu = np.array([299.0, 300.0, 301.0, 499.0, 500.0])
+    at_default = hu_to_acoustic(hu, mapping, bone_threshold_hu=300.0)
+    assert at_default[2][0] == SOFT_TISSUE_ALPHA0 and np.all(at_default[2][1:] > mapping.alpha_min)
+    # The threshold is the configured one, and it moves the absorption only.
+    raised = hu_to_acoustic(hu, mapping, bone_threshold_hu=500.0)
+    assert np.all(raised[2][:4] == SOFT_TISSUE_ALPHA0) and raised[2][4] == at_default[2][4]
+    np.testing.assert_array_equal(raised[0], at_default[0])
+    np.testing.assert_array_equal(raised[1], at_default[1])
+    with pytest.raises(ConfigError):
+        from_dict(HuMappingConfig, {"bone_threshold_hu": 0.0})
 
 
 def test_sampled_mapping_is_deterministic_and_stream_addressed(small_cfg):

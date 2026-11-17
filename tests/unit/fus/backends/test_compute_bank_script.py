@@ -3,11 +3,13 @@ import dataclasses
 import numpy as np
 import yaml
 
+from neurosim.common.config import from_dict
 from neurosim.common.io import load_bundle
 from neurosim.fus.backends.phantoms import slab_medium
+from neurosim.fus.config import RoiConfig
 from neurosim.fus.io import load_bank
 from neurosim.head.io import load_plane_medium, save_plane_medium
-from scripts.compute_bank import main
+from scripts.compute_bank import BankJob, main
 
 JOB = {
     "transducer": {
@@ -39,6 +41,13 @@ def test_plane_medium_round_trip(tmp_path, grid, soft, bone, spacing):
     for field in dataclasses.fields(medium):
         if field.name not in ("grid", "plane", "alpha_power"):
             np.testing.assert_array_equal(getattr(loaded, field.name), getattr(medium, field.name))
+
+
+def test_job_roi_is_the_imaging_roi_config():
+    job = from_dict(BankJob, JOB)
+    assert job.roi == RoiConfig(x_range=(-3.0e-3, 3.0e-3), z_range=(6.0e-3, 9.0e-3), spacing=1.5e-3)
+    # One ROI schema for the bank job and the imaging config: omitted keys take its defaults.
+    assert from_dict(BankJob, {**JOB, "roi": {}}).roi == RoiConfig()
 
 
 def test_script_prints_the_estimate_and_saves_the_bank(tmp_path, grid, soft, bone, spacing, capsys):

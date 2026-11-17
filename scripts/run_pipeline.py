@@ -20,13 +20,12 @@ from typing import Any
 from neurosim.common.config import from_dict, load_yaml
 from neurosim.common.io import provenance
 from neurosim.common.seeding import SeedTree
+from neurosim.common.units import bytes_to_gib
 from neurosim.data.config import RunConfig, trial_fidelity
 from neurosim.data.io import media_paths, save_run
 from neurosim.data.scene import build_scene_with_extras, estimate_cost
 from neurosim.data.trials import simulate_trials
 from neurosim.head.io import save_plane_medium
-
-_BYTES_PER_GIB = 2**30
 
 
 def describe_cost(cost: dict[str, Any]) -> str:
@@ -34,8 +33,8 @@ def describe_cost(cost: dict[str, Any]) -> str:
     bank, ct_prior = cost["bank"], cost["ct_prior"]
     return (
         f"estimated cost: about {cost['time_s']:.0f} s single-threaded, "
-        f"{cost['memory_bytes'] / _BYTES_PER_GIB:.2f} GiB peak memory, "
-        f"{cost['bundle_bytes'] / _BYTES_PER_GIB:.2f} GiB on disk\n"
+        f"{bytes_to_gib(cost['memory_bytes']):.2f} GiB peak memory, "
+        f"{bytes_to_gib(cost['bundle_bytes']):.2f} GiB on disk\n"
         f"  head {cost['head']['time_s']:.0f} s; CT prior {ct_prior['time_s']:.0f} s "
         f"({ct_prior['n_lateral']:.0f} x {ct_prior['n_depth']:.0f} pixels per slice); "
         f"{cost['n_backend_banks']} banks of {bank['run_time_s']:.0f} s "

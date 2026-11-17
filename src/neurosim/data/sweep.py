@@ -9,8 +9,9 @@ depends on the sweep config, the root seed and its index only, never on which
 other scenes are generated.
 
 The dataset is a directory: one run bundle per scene (`data.io.save_run`) and
-`index.json`, which lists every scene's file, seed and varied parameters and is
-a function of the sweep config and the root seed alone.
+`index.json`, which lists every scene's file, seed, varied parameters and the
+git commit that produced its bundle. Apart from the commits it is a function of
+the sweep config and the root seed alone.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from typing import Any
 import numpy as np
 
 from neurosim.common.config import config_hash, field, to_dict
-from neurosim.common.io import provenance
+from neurosim.common.io import load_attrs, provenance
 from neurosim.common.seeding import SeedTree
 from neurosim.data.config import RunConfig
 from neurosim.data.io import load_run, save_run
@@ -186,8 +187,12 @@ def scene_file(index: int) -> str:
 def sweep_index(cfg: SweepConfig, root_seed: int) -> dict[str, Any]:
     """The index of a sweep: provenance and, per scene, file, seed and varied parameters.
 
-    A function of the sweep config and the root seed only. Scene `i` is the run
-    of its `config_hash` with the seed subtree `SeedTree(root_seed).child(i)`.
+    Scene `i` is the run of its `config_hash` with the seed subtree
+    `SeedTree(root_seed).child(i)`. The top-level `git_commit` is that of the
+    code building the index (`common.io.git_commit`); everything else is a
+    function of the sweep config and the root seed only. Each scene's
+    `git_commit`, the commit that produced its bundle, is None here: `run_sweep`
+    fills it in from the bundles of a dataset directory.
     """
     tree = SeedTree(root_seed)
     scenes = []
@@ -201,36 +206,46 @@ def sweep_index(cfg: SweepConfig, root_seed: int) -> dict[str, Any]:
                 "seed_path": [index],
                 "config_hash": config_hash(run),
                 "varied": varied,
+                "git_commit": None,
             }
         )
     return {**provenance(cfg, root_seed), "n_scenes": cfg.n_scenes, "scenes": scenes}
 
 
-def _existing_run_matches(path: Path, entry: dict[str, Any]) -> bool:
-    """True if `path` holds the complete run of an index entry; False if it must be (re)made.
+def _existing_run_commit(path: Path, entry: dict[str, Any]) -> str | None:
+    """Git commit stored in the run bundle of an index entry; None if it must be (re)made.
+
+    Only the attributes of the bundle are read, not its arrays. HDF5 refuses to
+    open a file that was cut short, and a bundle gets its final name only once
+    it is complete, so readable attributes mean a complete bundle.
 
     Raises:
-        ValueError: if the file loads but belongs to another config, seed or scene.
+        ValueError: if the file opens but belongs to another config, seed or scene.
     """
     if not path.exists():
-        return False
+        return None
     try:
-        scene, _ = load_run(path)
+        attrs = load_attrs(path)
+        meta = attrs["meta"]
+        found = (meta["config_hash"], meta["root_seed"], meta.get("sweep", {}).get("index"))
+        commit = attrs["git_commit"]
     except (OSError, KeyError):
         # Not a readable run bundle (for example cut short by a crash): generate it again.
-        return False
-    found = (
-        scene.meta["config_hash"],
-        scene.meta["root_seed"],
-        scene.meta.get("sweep", {}).get("index"),
-    )
+        return None
     expected = (entry["config_hash"], entry["root_seed"], entry["index"])
     if found != expected:
         raise ValueError(
             f"{path} holds a run of another sweep (config hash, root seed, scene index) = "
             f"{found}, expected {expected}; use an empty output directory"
         )
-    return True
+    return commit
+
+
+def _write_index(out_dir: Path, index: dict[str, Any]) -> None:
+    """Write `index.json`: UTF-8 with "\\n" line ends, the same bytes on every system."""
+    (out_dir / INDEX_NAME).write_text(
+        json.dumps(index, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
+    )
 
 
 def _generate_scene(
@@ -251,13 +266,24 @@ def run_sweep(
     root_seed: int,
     out_dir: str | os.PathLike[str],
     scenes: tuple[int, ...] | None = None,
+    keep_existing: bool = False,
 ) -> dict[str, Any]:
     """Generate the scenes of a sweep into a dataset directory.
 
-    Writes `index.json` first, then one bundle per scene. A scene whose bundle
-    already exists and loads is skipped, so an interrupted sweep is resumed by
-    calling this again; a bundle is written under a temporary name and renamed
-    when complete. One scene is held in memory at a time.
+    Writes `index.json` first, then one bundle per scene, and updates the index
+    after each bundle. A requested scene whose complete bundle already exists
+    and was produced by the current git commit is skipped, so an interrupted
+    sweep is resumed by calling this again; a bundle is written under a
+    temporary name and renamed when complete. One scene is held in memory at a
+    time.
+
+    A dataset must not silently mix code versions: an existing bundle of a
+    requested scene whose stored commit differs from the current one
+    (`common.io.git_commit`, which marks a modified work tree with ``-dirty``)
+    is generated again, unless `keep_existing` is set. Two limits of the
+    comparison: all modified work trees of one commit share one ``-dirty``
+    name, and without git every commit is ``"unknown"``; such bundles compare
+    equal and are kept.
 
     Args:
         cfg: the sweep configuration.
@@ -265,22 +291,36 @@ def run_sweep(
         out_dir: dataset directory (created if missing).
         scenes: scene indices to generate; None = all. The index always lists
             every scene of the sweep.
+        keep_existing: keep the complete bundles of requested scenes that another
+            commit produced instead of generating them again.
 
     Returns:
-        the index (`sweep_index`).
+        the index: `sweep_index` with every scene's `git_commit` set to the commit
+        stored in its bundle, or None for a scene that has no bundle yet. A kept
+        bundle of another commit shows as a scene `git_commit` that differs from
+        the top-level one.
+
+    Raises:
+        ValueError: if a bundle in the directory belongs to another sweep.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     index = sweep_index(cfg, root_seed)
-    (out_dir / INDEX_NAME).write_text(
-        json.dumps(index, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    current_commit = index["git_commit"]
+    for entry in index["scenes"]:
+        entry["git_commit"] = _existing_run_commit(out_dir / entry["file"], entry)
+    _write_index(out_dir, index)
     tree = SeedTree(root_seed)
     for scene_index in range(cfg.n_scenes) if scenes is None else scenes:
         entry = index["scenes"][scene_index]
+        if entry["git_commit"] == current_commit:
+            continue
+        if entry["git_commit"] is not None and keep_existing:
+            continue
         path = out_dir / entry["file"]
-        if not _existing_run_matches(path, entry):
-            _generate_scene(cfg, tree, entry, path)
+        _generate_scene(cfg, tree, entry, path)
+        entry["git_commit"] = _existing_run_commit(path, entry)
+        _write_index(out_dir, index)
     return index
 
 

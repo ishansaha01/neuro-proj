@@ -1,8 +1,11 @@
 """Regenerate ``evals/REGISTRY.md`` from the registered evals and their latest results.
 
 Usage: ``python scripts/build_registry.py``. Imports every eval module (which
-fills ``neurosim.common.evalkit.REGISTRY``), reads ``evals/results/*.json`` and
-writes the table. An eval without a result file is listed as "not built".
+fills ``neurosim.common.evalkit.REGISTRY``), reads the result files ``E-*.json``
+from ``neurosim.common.evalkit.RESULTS_DIR`` (``evals/results`` of this checkout
+unless the environment variable ``NEUROSIM_EVAL_RESULTS`` names another
+directory; see `evalkit.resolve_results_dir`) and writes the table. An eval
+without a result file is listed as "not built".
 """
 
 from __future__ import annotations
@@ -91,7 +94,10 @@ def render_registry(
 def main() -> None:
     import_eval_modules()
     results = load_results(evalkit.RESULTS_DIR)
-    REGISTRY_PATH.write_text(render_registry(evalkit.REGISTRY, results), encoding="utf-8")
+    # newline="\n": the same bytes on every operating system.
+    REGISTRY_PATH.write_text(
+        render_registry(evalkit.REGISTRY, results), encoding="utf-8", newline="\n"
+    )
     counts = {"passing": 0, "failing": 0, "not built": 0}
     for eval_id in evalkit.REGISTRY:
         counts[status_of(results.get(eval_id))] += 1

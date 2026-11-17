@@ -33,6 +33,7 @@ from neurosim.common.constants import C_REF
 from neurosim.common.grid import Grid2D, sample_plane_map
 from neurosim.common.io import provenance, save_bundle
 from neurosim.common.seeding import SeedTree
+from neurosim.common.units import bytes_to_gib
 from neurosim.fus.acquire import acquire_frames, estimate_cost, statistical_power_doppler
 from neurosim.fus.beamform import make_beamformer
 from neurosim.fus.config import ImagingConfig, ImagingSetup, imaging_setup
@@ -43,8 +44,6 @@ from neurosim.fus.operators import pd_operator, psf_operator
 from neurosim.fus.scatterers import blood_scatterers, tissue_amplitude, tissue_scatterers
 from neurosim.fus.types import GreensBank
 from neurosim.head.io import load_plane_medium
-
-_BYTES_PER_GIB = 2**30
 
 
 def load_bank_for(path: str | os.PathLike[str], setup: ImagingSetup) -> GreensBank:
@@ -97,7 +96,7 @@ def main(argv: list[str]) -> int:
     cost = estimate_cost(cfg, n_items)
     print(
         f"fUS ({cfg.fidelity}): {cost['n_frames']:.0f} frames, {cost['flops']:.3g} flops, "
-        f"about {cost['memory_bytes'] / _BYTES_PER_GIB:.2f} GiB and {cost['time_s']:.0f} s"
+        f"about {bytes_to_gib(cost['memory_bytes']):.2f} GiB and {cost['time_s']:.0f} s"
     )
     if args.estimate_only:
         return 0

@@ -7,14 +7,13 @@ name = "neurosim"
 dynamic = ["version"]
 description = "Deterministic, physics-grounded simulator of a 3D head, a functional-ultrasound sensor and a CT scanner"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "numpy==2.2.6",
     "scipy==1.15.3",
     "pyyaml==6.0.3",
     "h5py==3.16.0",
     "matplotlib==3.10.9",
-    "scikit-image==0.26.0",
     "k-wave-python==0.6.2",
     "spekpy==2.5.4",
     "xraydb==4.6.1",

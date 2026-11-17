@@ -1,5 +1,7 @@
 import dataclasses
 import logging
+import os
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import pytest
@@ -7,8 +9,9 @@ from scipy.special import hankel1
 
 from neurosim.common.constants import C_REF
 from neurosim.common.grid import Grid2D
-from neurosim.fus.backends import BackendConfig, compute_bank
+from neurosim.fus.backends import BackendConfig, compute_bank, fullwave
 from neurosim.fus.backends.phantoms import Material, homogeneous_medium, slab_medium
+from neurosim.fus.io import save_bank
 from neurosim.fus.reference import reference_greens
 from neurosim.fus.types import Transducer
 
@@ -49,7 +52,9 @@ def test_bank_contract_fields_and_meta(water_bank):
     assert meta["time_steps"] == meta["cost_estimate"]["time_steps"]
     assert meta["source_factor_max_relative_deviation"] < 0.02
     assert meta["tail_level_db"] < -40.0
-    assert meta["run_time_s"] > 0.0 and meta["config"]["cfl"] == 0.3
+    assert meta["config"]["cfl"] == 0.3
+    # Nothing measured on the clock is stored (it would differ from run to run).
+    assert "run_time_s" not in meta
 
 
 def test_every_element_matches_the_analytic_greens_ratio(water_bank):
@@ -80,6 +85,44 @@ def test_reference_medium_gives_unit_bank_and_no_echo(grid, soft, transducer, ro
     np.testing.assert_allclose(bank.B, 1.0, atol=2e-3)
     direct = np.abs(reference_greens(transducer, np.array([[0.0, 4 * 0.3e-3]]), FREQS, C_REF)).max()
     assert np.abs(bank.static_fmc).max() < 5e-3 * direct
+
+
+def test_the_same_bank_computed_twice_is_saved_as_identical_bytes(
+    grid, soft, bone, transducer, roi, fast_kwave, spacing, tmp_path, caplog
+):
+    medium = slab_medium(grid, soft, bone, 9.5 * spacing, 6 * spacing, alpha_power=1.5)
+    provenance = {"root_seed": 0, "config_hash": "fixed"}
+    for name in ("first.h5", "second.h5"):
+        with caplog.at_level(logging.INFO, logger="neurosim.fus.backends"):
+            bank = compute_bank(medium, transducer, roi, FREQS, kwave(fast_kwave))
+        save_bank(tmp_path / name, bank, provenance)
+    assert (tmp_path / "first.h5").read_bytes() == (tmp_path / "second.h5").read_bytes()
+    # The measured run time goes to the log instead of the stored metadata.
+    measured = [r.getMessage() for r in caplog.records if "computed in" in r.getMessage()]
+    assert len(measured) == 2
+
+
+def test_worker_processes_are_spawned_with_single_threaded_libraries(monkeypatch):
+    start_methods = []
+
+    class RecordingExecutor(ProcessPoolExecutor):
+        def __init__(self, *args, **kwargs):
+            start_methods.append(kwargs["mp_context"].get_start_method())
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(fullwave, "ProcessPoolExecutor", RecordingExecutor)
+    monkeypatch.setenv("OMP_NUM_THREADS", "3")
+    monkeypatch.delenv("OPENBLAS_NUM_THREADS", raising=False)
+    names = fullwave._THREAD_VARIABLES
+    assert {"OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"} <= set(names)
+
+    # Each worker reports the thread variables of its own environment.
+    in_workers = list(fullwave._map_in_worker_processes(os.getenv, names, workers=2))
+
+    assert start_methods == ["spawn"]
+    assert in_workers == ["1"] * len(names)
+    # The environment of this process is as it was.
+    assert os.environ["OMP_NUM_THREADS"] == "3" and "OPENBLAS_NUM_THREADS" not in os.environ
 
 
 def test_worker_processes_give_the_same_bank(water_bank):

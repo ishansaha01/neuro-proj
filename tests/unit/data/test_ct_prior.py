@@ -12,8 +12,8 @@ from neurosim.common.config import ConfigError, from_dict, load_yaml, to_dict
 from neurosim.common.constants import BASIS_MATERIALS
 from neurosim.common.grid import Grid2D, Grid3D, PlaneSpec, plane_to_world, sample_volume
 from neurosim.common.seeding import SeedTree
-from neurosim.ct.acoustics import BONE_THRESHOLD_HU, nominal_hu_mapping, sample_hu_mapping
-from neurosim.ct.config import CtConfig
+from neurosim.ct.acoustics import nominal_hu_mapping, sample_hu_mapping
+from neurosim.ct.config import CtConfig, HuMappingConfig
 from neurosim.ct.io import load_ct, save_ct
 from neurosim.ct.simulate import estimate_cost as estimate_ct_cost
 from neurosim.ct.types import CtVolume
@@ -38,6 +38,8 @@ from neurosim.head.plane import default_plane, sample_plane
 from neurosim.head.types import HeadVolume, PlaneMedium, Tissue
 
 CONFIG_DIR = Path(__file__).resolve().parents[3] / "configs"
+# Bone threshold of the scan configs used here (they keep the default of the HU mapping) [HU].
+BONE_THRESHOLD_HU = HuMappingConfig().bone_threshold_hu
 
 AIR, WATER, SOFT_TISSUE, BONE = (BASIS_MATERIALS.index(name) for name in BASIS_MATERIALS)
 
@@ -140,7 +142,10 @@ def block_ct(block_head, plane, ct_cfg, prior_cfg) -> CtVolume:
 def block_medium(block_ct, fine_grid, plane, ct_cfg) -> PlaneMedium:
     hu_plane = ct_plane_hu(block_ct, fine_grid, plane)
     mapping = nominal_hu_mapping(ct_cfg)
-    return ct_plane_medium(hu_plane, fine_grid, plane, mapping, ct_cfg.hu_mapping.alpha_power)
+    hu_cfg = ct_cfg.hu_mapping
+    return ct_plane_medium(
+        hu_plane, fine_grid, plane, mapping, hu_cfg.alpha_power, hu_cfg.bone_threshold_hu
+    )
 
 
 @pytest.fixture(scope="module")
@@ -297,14 +302,14 @@ def test_scan_returns_the_slab_in_the_slab_frame(block_ct, plane, prior_cfg):
     assert block_ct.meta["slab_frame"]["u_lateral"] == list(plane.u_lateral)
     assert block_ct.meta["slab_frame"]["u_depth"] == list(plane.u_depth)
     assert block_ct.meta["ct_prior"] == to_dict(prior_cfg)
-    assert block_ct.meta["config"]["slab_z_range"] is None
+    assert block_ct.meta["config"]["slab_z_from_center"] is None
 
 
 def test_scan_ignores_the_axial_slab_range_of_the_scan_config(
     block_head, plane, ct_cfg, block_ct
 ):
     cfg = CtPriorConfig(slab_half_slices=0, margin=2.0e-3)
-    elsewhere = dataclasses.replace(ct_cfg, photon_noise=False, slab_z_range=(0.5, 0.6))
+    elsewhere = dataclasses.replace(ct_cfg, photon_noise=False, slab_z_from_center=(0.5, 0.6))
     ct = scan_plane(block_head, plane, elsewhere, cfg, SeedTree(0), EXTENT_X, EXTENT_Z)
     assert ct.hu.shape == (*block_ct.hu.shape[:2], 1)
     # Slices are independent and noise is off: the single slice is the central slice.
@@ -414,12 +419,19 @@ def test_medium_fields_follow_the_contract(ct_cfg, plane):
             [0.5 * mapping.hu_bone, 2.0 * mapping.hu_bone],
         ]
     )
-    medium = ct_plane_medium(hu_plane, grid, plane, mapping, alpha_power=1.3)
+    medium = ct_plane_medium(
+        hu_plane, grid, plane, mapping, alpha_power=1.3, bone_threshold_hu=BONE_THRESHOLD_HU
+    )
 
     assert medium.grid == grid and medium.plane == plane and medium.alpha_power == 1.3
     bone = Tissue.SKULL_OUTER
     np.testing.assert_array_equal(medium.labels, [[0, 0], [0, bone], [bone, bone]])
     assert medium.labels.dtype == np.uint8
+    # The bone label follows the configured threshold.
+    raised = ct_plane_medium(
+        hu_plane, grid, plane, mapping, alpha_power=1.3, bone_threshold_hu=BONE_THRESHOLD_HU + 1.0
+    )
+    np.testing.assert_array_equal(raised.labels, [[0, 0], [0, 0], [bone, bone]])
     threshold_porosity = 1.0 - BONE_THRESHOLD_HU / mapping.hu_bone
     np.testing.assert_allclose(
         medium.porosity, [[0.0, 0.0], [0.0, threshold_porosity], [0.5, 0.0]], atol=1e-6
@@ -440,7 +452,9 @@ def test_medium_fields_follow_the_contract(ct_cfg, plane):
 
 def test_medium_rejects_a_mismatched_image(ct_cfg, plane, fine_grid):
     with pytest.raises(ValueError, match="hu_plane"):
-        ct_plane_medium(np.zeros((3, 3)), fine_grid, plane, nominal_hu_mapping(ct_cfg), 1.1)
+        ct_plane_medium(
+            np.zeros((3, 3)), fine_grid, plane, nominal_hu_mapping(ct_cfg), 1.1, BONE_THRESHOLD_HU
+        )
 
 
 def test_mapping_choice(ct_cfg):
@@ -495,7 +509,7 @@ def test_estimate_cost_describes_the_slab_scan(ct_cfg, prior_cfg):
     grid = slab_grid(EXTENT_X, EXTENT_Z, BLOCK_SPACING, prior_cfg)
     assert (cost["n_lateral"], cost["n_depth"], cost["n_slices"]) == grid.shape
     assert cost["spacing"] == BLOCK_SPACING
-    reference = estimate_ct_cost(grid, dataclasses.replace(ct_cfg, slab_z_range=None))
+    reference = estimate_ct_cost(grid, dataclasses.replace(ct_cfg, slab_z_from_center=None))
     assert {key: cost[key] for key in reference} == reference
     one_slice = dataclasses.replace(prior_cfg, slab_half_slices=0)
     assert estimate_cost(BLOCK_SPACING, ct_cfg, one_slice, EXTENT_X, EXTENT_Z)["n_slices"] == 1
