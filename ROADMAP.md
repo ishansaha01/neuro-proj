@@ -100,6 +100,11 @@ Aberration, attenuation, reverberation, tissue clutter, electronic noise and CT 
 
 ## 3. Change log
 
+### 2026-11-16 — Add CLAUDE.md
+- **What:** Added `CLAUDE.md` with working rules for the repo: distinct physics evals with a registry (`evals/REGISTRY.md`, one claim per eval, thresholds fixed in advance), separate from unit tests; clean, non-duplicated code (single source of truth for constants, units, grids and randomness); grounding every number in a source; and logging every change here.
+- **Why:** To keep the simulator trustworthy and the code base clean as it grows.
+- **Files:** `CLAUDE.md`, `ROADMAP.md`
+
 ### 2026-11-16 — Add README and ROADMAP
 - **What:** Added `README.md`, a project overview drawn from the full 3-page proposal (motivation, the three skull effects, the method, the three stages, the planned layout and key references). Added `ROADMAP.md` with phases 0–5, design decisions D-001 to D-005 and this change log.
 - **Why:** To set the plan for the Wednesday goal (head, fUS sensor and CT scanner simulation) and to keep a structured record of every later change.
