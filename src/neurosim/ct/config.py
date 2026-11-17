@@ -13,6 +13,13 @@ from typing import Literal, Optional
 import numpy as np
 
 from neurosim.common.config import field
+from neurosim.common.constants import (
+    ALPHA_POWER_DEFAULT,
+    AUBRY_2003_ABSORPTION_EXPONENT,
+    AUBRY_2003_C_MAX,
+    AUBRY_2003_C_MIN,
+    C_REF,
+)
 
 Kernel = Literal["ramp", "shepp-logan", "hann"]
 
@@ -138,16 +145,20 @@ class HuMappingConfig:
         "is our split of that spread between hu_bone and c_bone; assumed, to verify.",
     )
     c_water: float = field(
-        1500.0, gt=0.0, doc="Sound speed at porosity 1 [m/s]. Aubry 2003 Eq. 5, c_min."
+        AUBRY_2003_C_MIN,
+        gt=0.0,
+        doc="Sound speed at porosity 1 [m/s]. Aubry 2003 Eq. 5, c_min.",
     )
     c_water_range: tuple[float, float] = field(
-        (1480.0, 1540.0),
+        (1480.0, C_REF),
         gt=0.0,
         doc="[m/s]. From water at 20 degC (1482 m/s) to the soft-tissue convention "
         "(1540 m/s); assumed, to verify.",
     )
     c_bone: float = field(
-        2900.0, gt=0.0, doc="Sound speed at porosity 0 [m/s]. Aubry 2003 Eq. 5, c_max."
+        AUBRY_2003_C_MAX,
+        gt=0.0,
+        doc="Sound speed at porosity 0 [m/s]. Aubry 2003 Eq. 5, c_max.",
     )
     c_bone_range: tuple[float, float] = field(
         (2700.0, 3100.0),
@@ -199,17 +210,20 @@ class HuMappingConfig:
         "Table 1); assumed, to verify.",
     )
     absorption_exponent: float = field(
-        0.5, gt=0.0, doc="Exponent beta of porosity in the absorption law [-]. Aubry 2003 Eq. 6."
+        AUBRY_2003_ABSORPTION_EXPONENT,
+        gt=0.0,
+        doc="Exponent beta of porosity in the absorption law [-]. Aubry 2003 Eq. 6.",
     )
     absorption_exponent_range: tuple[float, float] = field(
         (0.3, 0.7), gt=0.0, doc="[-]. Range tested by Aubry 2003."
     )
     alpha_power: float = field(
-        1.1,
+        ALPHA_POWER_DEFAULT,
         gt=0.0,
         doc="Global power-law exponent y of the acoustic model [-], used to express "
         "the absorption as alpha0 [dB/(cm MHz^y)]. Must equal HeadVolume.alpha_power "
-        "of the head being imaged; 1.1 is the default of head.materials.MaterialParams.",
+        "of the head being imaged; the default is the one of head.materials.MaterialParams "
+        "(common.constants.ALPHA_POWER_DEFAULT).",
     )
 
     def __post_init__(self) -> None:

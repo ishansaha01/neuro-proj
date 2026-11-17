@@ -1,7 +1,8 @@
 """Universal physical constants, each with its source.
 
-Only values shared by more than one area live here. Tissue and bone property
-tables belong to the ``head`` package.
+Only values shared by more than one area live here. Property tables that a
+single area uses (for example the soft-tissue acoustics of the ``head``
+package) stay in that area.
 
 Water and air are given at one reference state: 20 degC and 101.325 kPa, a
 room-temperature water bath.
@@ -40,3 +41,35 @@ C_AIR = 343.2
 
 # Basis materials of the CT model, in the channel order of material-fraction volumes.
 BASIS_MATERIALS = ("air", "water", "soft_tissue", "cortical_bone")
+
+# Mass density of soft tissue [kg/m^3]. NIST X-Ray Mass Attenuation Coefficients
+# (Hubbell & Seltzer), Table 2, "Tissue, Soft (ICRU-44)": 1.060 g/cm^3
+# (https://physics.nist.gov/PhysRefData/XrayMassCoef/tab2.html, checked 2026-11-17).
+# Used as the soft-tissue basis material of the CT model and as the pore content
+# of skull bone in the head's acoustic density, so both see the same mass.
+RHO_SOFT_TISSUE_ICRU44 = 1060.0
+
+# Mass density of pore-free cortical bone [kg/m^3]. NIST Table 2 (same URL),
+# "Bone, Cortical (ICRU-44)": 1.920 g/cm^3. Used as the bone basis material of
+# the CT model and as the solid phase of skull bone in the head's acoustic density.
+RHO_CORTICAL_BONE_ICRU44 = 1920.0
+
+# Constants of the porosity mixing law of Aubry et al. (2003), J. Acoust. Soc.
+# Am. 113(1):84-93, Eqs. 5-6. They are the defaults of the head's ground-truth
+# skull model (head.materials.SkullMixing) and the nominal constants of the
+# clinical HU -> acoustics map (ct.config.HuMappingConfig).
+# Sound speed at porosity 1, water-filled pores [m/s]: c_min = 1.5 mm/us.
+AUBRY_2003_C_MIN = 1500.0
+# Sound speed of pore-free cortical bone [m/s]: c_max = 2.9 mm/us (the value of
+# Fry & Barger 1978 for both tables).
+AUBRY_2003_C_MAX = 2900.0
+# Exponent beta of porosity in the absorption law [-]: best match 0.5, tested
+# range 0.3-0.7.
+AUBRY_2003_ABSORPTION_EXPONENT = 0.5
+
+# Default exponent y of the power-law acoustic absorption alpha0 * f**y [-],
+# shared by the head's material mapping and the CT-derived acoustic map, which
+# must use the same exponent. Soft tissue is close to 1, but k-Wave's power-law
+# absorption has a dispersion term proportional to tan(pi y / 2), singular at
+# y = 1, so 1.1 is used; assumed, to verify.
+ALPHA_POWER_DEFAULT = 1.1

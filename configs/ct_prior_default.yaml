@@ -1,0 +1,14 @@
+# Default CT-derived skull prior of an imaging plane: a thin slab aligned with the
+# plane is resampled from the head and scanned (a tilted-gantry acquisition), so
+# its central slice is the imaging plane. Every value equals the default of
+# neurosim.data.ct_prior.CtPriorConfig (checked by tests/unit/data/test_ct_prior.py);
+# sources are in the field docs there.
+# Cost with configs/ct_default.yaml on a 0.5 mm head, for a plane region 50 mm wide
+# and 55 mm deep (121 x 131 pixels per slice with the margin): estimated 33 s per
+# slice single-threaded (14-21 s measured on the 2-core development machine) and
+# 0.4 GB; neurosim.data.ct_prior.estimate_cost gives the estimate for any other case. Only the central slice enters the plane's medium:
+# set slab_half_slices to 0 for the cheapest scan.
+slab_half_slices: 1
+slab_spacing: null
+margin: 5.0e-3
+hu_mapping: nominal

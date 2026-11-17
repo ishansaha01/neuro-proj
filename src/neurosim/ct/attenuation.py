@@ -17,7 +17,13 @@ import numpy as np
 import xraydb
 from numpy.typing import ArrayLike
 
-from neurosim.common.constants import BASIS_MATERIALS, RHO_AIR, RHO_WATER
+from neurosim.common.constants import (
+    BASIS_MATERIALS,
+    RHO_AIR,
+    RHO_CORTICAL_BONE_ICRU44,
+    RHO_SOFT_TISSUE_ICRU44,
+    RHO_WATER,
+)
 
 # Composition by weight, atomic number -> mass fraction. NIST Table 2 (URL above),
 # rows "Air, Dry (near sea level)", "Water, Liquid", "Tissue, Soft (ICRU-44)" and
@@ -49,14 +55,14 @@ MASS_FRACTIONS: Mapping[str, Mapping[int, float]] = {
     },
 }
 
-# Mass density of each pure basis material [kg/m^3]. Air and water: the project's
-# reference state (common.constants). Soft tissue 1.060 g/cm^3 and cortical bone
-# 1.920 g/cm^3: NIST Table 2, same rows as above.
+# Mass density of each pure basis material [kg/m^3], all from common.constants.
+# Air and water: the project's reference state. Soft tissue and cortical bone:
+# NIST Table 2, same rows as above.
 DENSITIES: Mapping[str, float] = {
     "air": RHO_AIR,
     "water": RHO_WATER,
-    "soft_tissue": 1060.0,
-    "cortical_bone": 1920.0,
+    "soft_tissue": RHO_SOFT_TISSUE_ICRU44,
+    "cortical_bone": RHO_CORTICAL_BONE_ICRU44,
 }
 
 # xraydb takes energies in eV and returns cm^2/g. Used only at this boundary.

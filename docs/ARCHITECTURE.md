@@ -74,7 +74,9 @@ Streams (append only): `anatomy`, `skull_microstructure`, `hidden_soundspeed`,
   surface (`sdf`), `porosity`, `hidden_c` (the part of sound speed X-rays cannot
   see), acoustic maps (`sound_speed`, `density`, `attenuation`), CT basis-material
   volume fractions (`material_fractions`), and the CBV model (`cbv_baseline`,
-  `activation`, `blood_speed`).
+  `activation`, `blood_velocity`). `generate_head` returns `GeneratedHead`, a
+  `HeadVolume` that also carries the `MaterialParams` it was built with, so
+  `sample_plane` can apply the same mapping.
 - `PlaneMedium`: the same quantities sampled on a fine `Grid2D` in one imaging
   plane.
 

@@ -28,7 +28,17 @@ from dataclasses import dataclass
 import numpy as np
 
 from neurosim.common.config import field
-from neurosim.common.constants import BASIS_MATERIALS, C_WATER, RHO_WATER
+from neurosim.common.constants import (
+    ALPHA_POWER_DEFAULT,
+    AUBRY_2003_ABSORPTION_EXPONENT,
+    AUBRY_2003_C_MAX,
+    AUBRY_2003_C_MIN,
+    BASIS_MATERIALS,
+    C_WATER,
+    RHO_CORTICAL_BONE_ICRU44,
+    RHO_SOFT_TISSUE_ICRU44,
+    RHO_WATER,
+)
 from neurosim.common.units import db_cm_mhz_to_np_m, np_m_to_db_cm
 from neurosim.head.types import BRAIN_LABELS, SKULL_LABELS, Tissue
 
@@ -57,13 +67,13 @@ class SkullMixing:
     """Constants of the porosity mixing law for skull bone (Aubry et al. 2003, Eqs. 4-6)."""
 
     c_fluid: float = field(
-        1500.0,
+        AUBRY_2003_C_MIN,
         gt=0.0,
         doc="Sound speed of the pore fluid [m/s]. Aubry 2003: c_min = 1.5 mm/us "
         "(water-filled pores).",
     )
     c_bone: float = field(
-        2900.0,
+        AUBRY_2003_C_MAX,
         gt=0.0,
         doc="Sound speed of pore-free cortical bone [m/s]. Aubry 2003: c_max = 2.9 mm/us, "
         "the value of Fry & Barger (1978) for both tables. Later CT-based work used "
@@ -71,7 +81,7 @@ class SkullMixing:
         "against the paper: assumed, to verify).",
     )
     rho_fluid: float = field(
-        1060.0,
+        RHO_SOFT_TISSUE_ICRU44,
         gt=0.0,
         doc="Mass density of the pore content [kg/m^3]. 1.060 g/cm^3, 'Tissue, Soft "
         "(ICRU-44)' in NIST X-Ray Mass Attenuation Coefficients, Table 2: the basis "
@@ -80,7 +90,7 @@ class SkullMixing:
         "1000 (water-filled skulls in vitro).",
     )
     rho_bone: float = field(
-        1920.0,
+        RHO_CORTICAL_BONE_ICRU44,
         gt=0.0,
         doc="Mass density of pore-free cortical bone [kg/m^3]. 1.920 g/cm^3, 'Bone, "
         "Cortical (ICRU-44)' in NIST Table 2, the CT basis material. Aubry 2003 used "
@@ -107,7 +117,7 @@ class SkullMixing:
         "assumed, to verify).",
     )
     absorption_exponent: float = field(
-        0.5,
+        AUBRY_2003_ABSORPTION_EXPONENT,
         gt=0.0,
         doc="Exponent beta of porosity in the absorption law. Aubry 2003: best match "
         "0.5, plausible range 0.3-0.7.",
@@ -163,7 +173,7 @@ class MaterialParams:
     """Parameters of the material mapping."""
 
     alpha_power: float = field(
-        1.1,
+        ALPHA_POWER_DEFAULT,
         gt=0.0,
         lt=3.0,
         doc="Global power-law exponent y of absorption, alpha0 * f**y. Soft tissue is "
