@@ -128,12 +128,14 @@ On top of a bank (`fus/types.py` has the types):
    frequency-domain channel data `[f, angle, element]` for a set of point
    scatterers (position, complex amplitude). A plane-wave transmit is a delayed
    sum of element transmits.
-2. **Beamforming.** `das(spectra, pixel_grid, delays)` is delay-and-sum with
-   coherent compounding. Default delays assume `C_REF` (as a real scanner does);
-   corrected delays come from `ray` travel times through a given sound-speed map
-   (true skull or CT-derived skull).
+2. **Beamforming.** `das(spectra, pixel_grid, model_bank, sequence)` is
+   delay-and-sum with coherent compounding, written as phase conjugation against
+   a *model* bank and normalised to unit scatterer gain under that model. With
+   the homogeneous bank it is conventional DAS at `C_REF` (as a real scanner
+   does); with a `ray` bank through a given sound-speed map (true skull or
+   CT-derived skull) it is aberration-corrected beamforming (D-011).
 3. **Doppler.** Frames -> SVD clutter filter (Demené 2015) -> power Doppler.
-4. **Operators.** `psf_operator(bank, pixel_grid, source_grid, delays) -> A`
+4. **Operators.** `psf_operator(bank, pixel_grid, source_grid, model_bank, sequence) -> A`
    (complex, `[n_pix, n_src]`) is built from 1 and 2 applied to unit scatterers, so
    there is no second implementation. For blood with random phases the expected
    power Doppler image is linear in CBV: `E[PD] = H @ cbv`, `H = |A|^2`

@@ -1,0 +1,23 @@
+# Tiny fUS setup used by the unit tests and evals (tests/unit/fus, evals/fus): a 48-element
+# array imaging a 12 mm x 12 mm region at 30 mm depth. One frame takes about 0.1 s.
+# Keys that are left out take the defaults of neurosim.fus.config.ImagingConfig.
+transducer:
+  n_elements: 48
+sequence:
+  angles_deg: [-10.0, -5.0, 0.0, 5.0, 10.0]
+  frame_rate: 500.0              # Hz
+  n_frames: 40
+frequencies:
+  n_frequencies: 56
+roi:
+  x_range: [-0.006, 0.006]       # m
+  z_range: [0.024, 0.036]        # m
+  spacing: 1.0e-3                # m
+pixels:
+  shape: [32, 32]
+doppler:
+  cutoff_rule: fixed
+  n_discard: 2
+scatterers:
+  n_blood: 800
+  n_tissue: 800

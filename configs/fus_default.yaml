@@ -1,0 +1,48 @@
+# fUS imaging chain, ROADMAP defaults (phase 2): 128-element linear array at 2 MHz,
+# 9 plane waves over +-10 degrees. Every value below equals the default of
+# neurosim.fus.config.ImagingConfig; the sources of the values are in the field docs there.
+transducer:
+  n_elements: 128
+  center_frequency: 2.0e6        # Hz
+  fractional_bandwidth: 0.6      # -6 dB two-way; assumed, to verify
+  pitch_wavelengths: 0.5
+  element_width_fraction: 0.9
+sequence:
+  angles_deg: [-10.0, -7.5, -5.0, -2.5, 0.0, 2.5, 5.0, 7.5, 10.0]
+  frame_rate: 500.0              # Hz, compounded
+  n_frames: 200
+frequencies:
+  n_frequencies: 128             # unambiguous window 1/df must hold the ROI (fus.window)
+  truncation_db: 20.0
+roi:
+  x_range: [-0.015, 0.015]       # m
+  z_range: [0.020, 0.050]        # m
+  spacing: 1.0e-3                # m
+pixels:
+  shape: [64, 64]
+  spacing: null                  # largest that fits the ROI
+beamforming:
+  f_number: 0.0                  # 0 = whole array
+  window: boxcar
+doppler:
+  cutoff_rule: fixed
+  n_discard: 30
+  energy_fraction: 0.99
+  cutoff_frequency: 10.0         # Hz
+  effective_frames: null
+noise:
+  electronic_noise: true
+  electronic_snr_db: -10.0
+  tissue_clutter: true
+  tissue_to_blood_db: 40.0
+  tissue_motion: true
+  tissue_motion_rms: 20.0e-6     # m
+  tissue_motion_frequencies: [0.25, 1.2]   # Hz
+  static_clutter: true
+  static_clutter_scale: 1.0
+  cbv_reference: 0.03
+scatterers:
+  n_blood: 8000
+  n_tissue: 4000
+  blood_transit_length: 1.0e-3   # m
+fidelity: scatterer
