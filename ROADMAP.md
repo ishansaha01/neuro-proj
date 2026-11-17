@@ -96,9 +96,47 @@ One root seed per run, split with `numpy.random.SeedSequence.spawn` into named s
 **D-005 — Every noise effect is a switch.** *Proposed, 16 Nov.*
 Aberration, attenuation, reverberation, tissue clutter, electronic noise and CT photon noise can each be turned on or off and scaled from the config. This allows clean ablations: how much of the image loss comes from each effect.
 
+**D-006 — Three-tier forward model through a Green's bank.** *Proposed, 17 Nov.*
+Everything a medium does to the sound field is stored once per skull as `B = G_medium / G_ref`, the one-way transfer function from each array element to each ROI point relative to a homogeneous reference at 1540 m/s. Three backends produce it behind one interface: `analytic` (water), `ray` (straight rays: delay, absorption, interface loss; seconds) and `kwave` (full wave; one simulation per element). This is the proposal's speed-up made concrete: the skull is simulated once, and any blood configuration is then synthesised linearly. Details in `docs/ARCHITECTURE.md` section 5.
+
+**D-007 — Born approximation for blood and brain tissue; two data fidelities.** *Proposed, 17 Nov.*
+Blood and brain-tissue scatterers are weak, so received signals are linear in them while the skull is treated exactly through the bank. `scatterer` fidelity moves explicit scatterers frame by frame (slow, physically explicit). `statistical` fidelity uses the fact that for random-phase blood the expected power Doppler image is linear in CBV, `E[PD] = H @ cbv` with `H = |A|^2`, plus gamma speckle and a noise floor (fast). E-FUS-014 checks the second against the first. `H` is also the image-domain forward model of the reconstruction.
+
+**D-008 — Full-wave solver: k-wave-python 0.6.2, pure-Python backend, dispersion off, CFL 0.1.** *Proposed, 17 Nov. Supersedes the solver-binary part of D-001.*
+k-wave-python 0.6.2 ships a NumPy solver, so no C++ binary is needed and the same code runs on Windows, macOS and Linux. Its dispersion term is switched off by default: with bone-like absorption at y = 1.1 it raises the simulated phase speed about 21 % above the sound-speed map, so the reference tier would not simulate the medium the head model describes (E-FUS-003, E-FUS-008). Default CFL is 0.1 because the k-space scheme has a phase error next to bone that grows with CFL^2. j-Wave is not wired in yet. Cost: about 300 core-hours for 128 elements at full resolution, so the `ray` backend is the workhorse and k-Wave is a small-scale reference.
+
+**D-009 — PyTorch for the diffusion prior and the reconstruction.** *Decided by Sanketh, 17 Nov.*
+Familiar, installs easily on Windows and macOS, runs on CPU. JAX (which would pair with j-Wave) was the alternative.
+
+**D-010 — The paired clean run removes the skull in place.** *Proposed, 17 Nov.*
+"Without the skull" means the same imaging plane with skull pixels given grey-matter acoustic properties (`head.ablations.remove_skull`). Geometry, scalp, CSF and brain are unchanged, so the clean and corrupted images are registered pixel for pixel.
+
+**D-011 — Corrected beamforming is phase conjugation against a model bank.** *Proposed, 17 Nov.*
+`das` takes a model `GreensBank`. The homogeneous bank gives conventional delay-and-sum at 1540 m/s. A ray bank through the CT-derived skull gives the "CT-derived delay correction" baseline; a ray bank through the true skull gives the "true-skull correction" baseline. The beamformer is normalised to unit scatterer gain under its model, so a correct model restores the peak by construction and pays in noise gain where the model field is weak. A plain average was the alternative; it leaves the corrected peak 1–3 dB low because phase conjugation cannot restore the transmit amplitude an aberrator removes. To confirm.
+
+**D-012 — One global absorption exponent, y = 1.1.** *Proposed, 17 Nov.*
+k-Wave's power-law absorption needs one exponent for the whole medium and is singular at y = 1. Absorption is stored as `alpha0` in dB/(cm MHz^y).
+
+**D-013 — Blood scatterer model.** *Proposed, 17 Nov.*
+Constant-magnitude scatterers with random signs (all-positive amplitudes make the mean density a coherent reflector), density proportional to CBV, moving on re-entrant straight paths so the density stays proportional to CBV, normalised so that `E[PD] = H @ (cbv * cell_area)` whatever the scatterer count.
+
+**D-014 — Material constants: choices that need the team's confirmation.** *Proposed, 17 Nov.*
+(a) Bone and pore densities follow NIST ICRU-44 (1920 and 1060 kg/m^3) instead of Aubry 2003 (2100 and 1000), so the acoustic density equals the mass the CT sees. (b) True skull absorption end points (1.4 and 11.2 dB/cm at 0.5 MHz) are fitted to the Aubry 2022 benchmark values; Aubry 2003's own 0.2 and 8 dB/mm would roughly double the skull loss. (c) The CT prior uses Aubry 2003's nominal map, so its absorption is about twice the truth: a deliberately imperfect prior, but the size of the error is a choice. (d) The hidden sound-speed component has a standard deviation of about 220–250 m/s at `porosity_r2 = 0.5`, because the porosity-driven variance is dominated by the table/diploë contrast; Webb 2018 measured across whole fragments, which is a different variance. (e) Water and air constants use a 20 °C reference state, not 37 °C.
+
+**D-015 — The CT prior is scanned in a slab aligned with the imaging plane.** *Proposed, 17 Nov.*
+The imaging plane is oblique to the head axes; scanning every axial slice it crosses would take tens of minutes. A thin slab aligned with the plane is scanned instead (physically a tilted-gantry acquisition), so the central CT slice is the imaging plane. Cost: the slab is an isolated block, so beam hardening and photon noise are weaker than in a full head scan.
+
+**D-016 — Development scale.** *Proposed, 17 Nov.*
+The head is generated as a box region around the probe (default 80 mm at 0.5 mm) rather than a full head (6.8e7 voxels, about 8 GB). Tests and evals use small grids. Full-resolution runs are launched by the user.
+
 ---
 
 ## 3. Change log
+
+### 2026-11-17 — Record design decisions D-006 to D-016
+- **What:** Added design decisions D-006 to D-016 covering the Green's-bank forward model, the Born approximation and the two data fidelities, the k-Wave solver settings, PyTorch, the paired clean run, model-bank beamforming, the absorption exponent, the blood scatterer model, material constants that need confirmation, the plane-aligned CT slab, and development scale. Added the `Scene` / `TrialSet` contract types in `src/neurosim/data/types.py`.
+- **Why:** These choices were made while building phases 1 to 3 and change results; CLAUDE.md section 3 requires them to be recorded rather than left as silent defaults. D-011 and D-014 in particular need the team's confirmation.
+- **Files:** `ROADMAP.md`, `src/neurosim/data/types.py`.
 
 ### 2026-11-17 — fUS imaging chain: synthesis, beamforming, Doppler, operators (Phase 2)
 - **What:** Added the imaging chain on top of `GreensBank`: typed `ImagingConfig` with range-aliasing validation (`fus/config.py`, `fus/window.py`); Gaussian two-way pulse and frequency grid (`fus/pulse.py`); medium Green's function G = B * G_ref (`fus/greens.py`); Born channel synthesis and static skull clutter (`fus/synthesis.py`); delay-and-sum as phase conjugation against a model bank, with f-number and Hann options and an analytic noise gain (`fus/beamform.py`); SVD clutter filter, cutoff rules and power Doppler (`fus/doppler.py`); `psf_operator` and `pd_operator` built from the same factors as synthesis and DAS (`fus/operators.py`); blood scatterers (density proportional to CBV) and tissue scatterers (`fus/scatterers.py`); electronic noise and rigid tissue micro-motion on sub-indexed streams (`fus/noise.py`); phase-screen banks (`fus/screen.py`); `acquire_frames`, `acquire_power_doppler`, `statistical_power_doppler`, `estimate_cost` (`fus/acquire.py`); `scripts/run_fus.py`; `configs/fus_default.yaml` (128 elements, 2 MHz, 9 angles over ±10°) and `configs/fus_small.yaml`. `fus/reference.py` now uses the large-argument Hankel expansion where k r >= 20 (equal to `hankel1` to 1e-11, about 20 times faster).
