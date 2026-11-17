@@ -1,0 +1,42 @@
+# Default run, ROADMAP settings: 128-element array at 2 MHz, 9 plane waves over +-10 degrees,
+# the 0.5 mm box head, the ray backend and statistical fidelity, with the fUS default ROI
+# (30 mm x 30 mm from 20 mm depth) on 64 x 64 pixels and the clinical CT geometry.
+# Estimated by scripts/run_pipeline.py --estimate-only on the 2-core development machine:
+# about 24 minutes single-threaded (the 16 operator passes take 22 of them), 2.05 GiB peak
+# memory and a 0.61 GiB bundle. That is above the 1.5 GB limit of the shared development
+# machine, so this configuration is validated and costed there but has not been run.
+# Every value below that is not a comment-marked choice of this file equals the default of
+# the package config it belongs to; keys left out keep those defaults too.
+head:
+  grid:
+    spacing: 0.5e-3
+    region: box
+    box_size: [0.08, 0.08, 0.08]
+    box_center_depth: 0.025
+imaging:
+  transducer:
+    n_elements: 128
+    center_frequency: 2.0e6      # Hz
+  sequence:
+    angles_deg: [-10.0, -7.5, -5.0, -2.5, 0.0, 2.5, 5.0, 7.5, 10.0]
+    frame_rate: 500.0            # Hz
+    n_frames: 200
+  frequencies:
+    n_frequencies: 128
+  roi:
+    x_range: [-0.015, 0.015]     # m
+    z_range: [0.020, 0.050]      # m
+    spacing: 1.0e-3
+  pixels:
+    shape: [64, 64]
+    spacing: null                # 0.476 mm, the largest that fits the ROI
+  fidelity: statistical          # choice of this file; the fus default is scatterer
+backend:
+  backend: ray
+ct_prior:
+  slab_half_slices: 0            # choice of this file: only the central slice is used
+medium_spacing: 1.0e-4           # m
+source_refinement: 2             # choice of this file: 0.24 mm sub-cells
+trials:
+  n_images: 120
+  image_interval: 1.0            # s

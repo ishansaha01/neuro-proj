@@ -71,6 +71,22 @@ class Scatterers:
 
 
 @dataclass(frozen=True)
+class PhaseScreen:
+    """Low-dimensional skull model: one delay and one amplitude per array element.
+
+    Applied to a bank as `B * amplitude_e * exp(+i 2 pi f delay_e)`
+    (`neurosim.fus.screen.apply_phase_screen`).
+
+    Attributes:
+        delays: extra one-way delay per element [s], float64, shape (n_elements,).
+        amplitudes: one-way amplitude factor per element (dimensionless, > 0), shape (n_elements,).
+    """
+
+    delays: np.ndarray
+    amplitudes: np.ndarray
+
+
+@dataclass(frozen=True)
 class GreensBank:
     """Everything one medium does to the sound field, relative to a homogeneous reference.
 

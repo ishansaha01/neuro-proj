@@ -6,17 +6,14 @@ Usage: ``python scripts/run_fus.py --config configs/fus_default.yaml (--bank ban
 
 Inputs:
 
-- ``--bank``: a Green's-bank bundle as written by ``scripts/compute_bank.py`` (datasets
-  ``B``, ``freqs`` and optionally ``static_fmc``; attributes ``roi_shape``, ``roi_spacing``,
-  ``roi_origin``, ``c_ref``, ``backend``). The array is taken from the config and must have
-  the bank's number of elements. ``--water`` uses the homogeneous reference medium on the
-  config's ROI and frequency grid instead.
+- ``--bank``: a Green's-bank bundle written by `neurosim.fus.io.save_bank` (for example by
+  ``scripts/compute_bank.py``). Its array must be the array of the config. ``--water`` uses
+  the homogeneous reference medium on the config's ROI and frequency grid instead.
 - ``--model-bank``: the medium the beamformer assumes, in the same format. Default: the
   homogeneous medium (conventional delay-and-sum).
-- ``--cbv``: a bundle with datasets ``cbv_baseline`` (nz, nx) and ``blood_velocity``
-  (2, nz, nx) and attributes ``grid_shape``, ``grid_spacing``, ``grid_origin`` (the names of
-  the plane-medium bundle). Both maps are sampled bilinearly at the pixel centres; the pixel
-  grid is the CBV grid of the simulation.
+- ``--cbv``: a plane-medium bundle written by `neurosim.head.io.save_plane_medium`. Its
+  ``cbv_baseline`` and ``blood_velocity`` maps are sampled bilinearly at the pixel centres;
+  the pixel grid is the CBV grid of the simulation.
 
 Output bundle: ``power_doppler`` (nz, nx) float32 and, at scatterer fidelity, ``frames``
 (n_frames, nz, nx) complex64; attributes: provenance, the pixel grid, the bank's backend and
@@ -34,57 +31,41 @@ import numpy as np
 from neurosim.common.config import from_dict, load_yaml
 from neurosim.common.constants import C_REF
 from neurosim.common.grid import Grid2D, sample_plane_map
-from neurosim.common.io import load_bundle, provenance, save_bundle
+from neurosim.common.io import provenance, save_bundle
 from neurosim.common.seeding import SeedTree
 from neurosim.fus.acquire import acquire_frames, estimate_cost, statistical_power_doppler
 from neurosim.fus.beamform import make_beamformer
 from neurosim.fus.config import ImagingConfig, ImagingSetup, imaging_setup
 from neurosim.fus.doppler import choose_svd_cutoff, power_doppler, svd_clutter_filter
+from neurosim.fus.io import load_bank
 from neurosim.fus.noise import electronic_noise_variance
 from neurosim.fus.operators import pd_operator, psf_operator
 from neurosim.fus.scatterers import blood_scatterers, tissue_amplitude, tissue_scatterers
 from neurosim.fus.types import GreensBank
+from neurosim.head.io import load_plane_medium
 
 _BYTES_PER_GIB = 2**30
 
 
-def load_bank(path: str | os.PathLike[str], setup: ImagingSetup) -> GreensBank:
-    """Read a Green's-bank bundle (module docstring); the array comes from the config."""
-    arrays, attrs = load_bundle(path)
-    if arrays["B"].shape[1] != setup.transducer.n_elements:
+def load_bank_for(path: str | os.PathLike[str], setup: ImagingSetup) -> GreensBank:
+    """Read a Green's-bank bundle and check that it is for the array of the config."""
+    bank = load_bank(path)
+    if bank.transducer != setup.transducer:
         raise ValueError(
-            f"{path}: bank has {arrays['B'].shape[1]} elements, "
-            f"the config has {setup.transducer.n_elements}"
+            f"{path}: the bank is for {bank.transducer}, the config has {setup.transducer}"
         )
-    return GreensBank(
-        freqs=arrays["freqs"],
-        roi=Grid2D(
-            shape=tuple(attrs["roi_shape"]),
-            spacing=attrs["roi_spacing"],
-            origin=tuple(attrs["roi_origin"]),
-        ),
-        B=arrays["B"],
-        c_ref=attrs["c_ref"],
-        transducer=setup.transducer,
-        backend=attrs["backend"],
-        static_fmc=arrays.get("static_fmc"),
-    )
+    return bank
 
 
 def load_cbv(path: str | os.PathLike[str], grid: Grid2D) -> tuple[np.ndarray, np.ndarray]:
-    """Read CBV and blood velocity maps (module docstring) and sample them on `grid`.
+    """Read the CBV and blood velocity maps of a plane medium and sample them on `grid`.
 
     Returns `(cbv, velocity)`: float64, shapes (nz, nx) and (2, nz, nx) [fraction, m/s].
     """
-    arrays, attrs = load_bundle(path)
-    source = Grid2D(
-        shape=tuple(attrs["grid_shape"]),
-        spacing=attrs["grid_spacing"],
-        origin=tuple(attrs["grid_origin"]),
-    )
+    medium = load_plane_medium(path)
     points = grid.points()
-    cbv = sample_plane_map(arrays["cbv_baseline"], source, points)
-    velocity = sample_plane_map(arrays["blood_velocity"], source, points)
+    cbv = sample_plane_map(medium.cbv_baseline, medium.grid, points)
+    velocity = sample_plane_map(medium.blood_velocity, medium.grid, points)
     return cbv.astype(np.float64), velocity.astype(np.float64)
 
 
@@ -96,7 +77,7 @@ def main(argv: list[str]) -> int:
     medium.add_argument("--bank", help="Green's-bank bundle of the medium (HDF5)")
     medium.add_argument("--water", action="store_true", help="homogeneous reference medium")
     parser.add_argument("--model-bank", help="bank the beamformer assumes (default: homogeneous)")
-    parser.add_argument("--cbv", required=True, help="CBV / blood velocity bundle (HDF5)")
+    parser.add_argument("--cbv", required=True, help="plane-medium bundle with the CBV maps (HDF5)")
     parser.add_argument("--seed", type=int, required=True, help="root seed of the run")
     parser.add_argument("--out", help="output HDF5 file (required unless --estimate-only)")
     parser.add_argument(
@@ -125,9 +106,9 @@ def main(argv: list[str]) -> int:
     if args.water:
         bank = GreensBank.homogeneous(setup.transducer, setup.roi, setup.freqs, C_REF)
     else:
-        bank = load_bank(args.bank, setup)
+        bank = load_bank_for(args.bank, setup)
     if args.model_bank:
-        model_bank = load_bank(args.model_bank, setup)
+        model_bank = load_bank_for(args.model_bank, setup)
     else:
         model_bank = GreensBank.homogeneous(bank.transducer, bank.roi, bank.freqs, bank.c_ref)
     cbv, velocity = load_cbv(args.cbv, source_grid)

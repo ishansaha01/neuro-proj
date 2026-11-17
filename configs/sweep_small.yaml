@@ -1,0 +1,59 @@
+# Tiny sweep for unit tests and evals: 3 scenes of configs/run_small.yaml (`base` equals
+# that file, checked by tests/unit/data/test_configs.py) with every kind of variation
+# switched on. About 3 s per scene.
+base:
+  head:
+    grid:
+      spacing: 2.0e-3
+      region: box
+      box_size: [0.064, 0.064, 0.064]
+      box_center_depth: 0.02
+  imaging:
+    transducer:
+      n_elements: 48
+    sequence:
+      angles_deg: [-10.0, -5.0, 0.0, 5.0, 10.0]
+      frame_rate: 500.0            # Hz
+      n_frames: 40
+    frequencies:
+      n_frequencies: 56
+    roi:
+      x_range: [-0.006, 0.006]     # m
+      z_range: [0.014, 0.026]      # m: skull base, CSF, cortex and white matter of most seeds
+      spacing: 1.0e-3
+    pixels:
+      shape: [16, 16]
+      spacing: 0.75e-3
+    doppler:
+      cutoff_rule: fixed
+      n_discard: 2
+    scatterers:
+      n_blood: 800
+      n_tissue: 800
+    fidelity: statistical
+  backend:
+    backend: ray
+  ct:
+    geometry:
+      n_views: 240
+      n_detectors: 192
+      detector_pitch: 2.1e-3
+    calibration_phantom_diameter: 0.16
+    max_chunk_samples: 2000000
+  ct_prior:
+    slab_half_slices: 0            # only the central slice enters the plane's medium
+  medium_spacing: 0.2e-3           # m
+  source_refinement: 2             # 0.375 mm sub-cells, half a wavelength at 2 MHz
+  trials:
+    n_images: 12
+    image_interval: 10.0           # s: images at 0, 10, ..., 110 s span rest and task
+n_scenes: 3
+center_frequencies: [1.8e6, 2.0e6]   # Hz
+probe_shift_jitter: 1.0e-3           # m
+probe_tilt_jitter_deg: 1.0
+target_direction_jitter_deg: 3.0
+effects:
+  - {aberration: true, attenuation: true, reverberation: true}
+  - {aberration: false, attenuation: true, reverberation: true}
+  - {aberration: true, attenuation: false, reverberation: true}
+electronic_snr_db: [0.0, 20.0]

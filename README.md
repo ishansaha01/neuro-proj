@@ -44,22 +44,78 @@ See **[ROADMAP.md](ROADMAP.md)** for the detailed plan, the design decisions and
 
 ---
 
-## Repository layout (planned)
+## Status (17 Nov 2026)
+
+All three stages exist as working, tested code on the `build-out` branch. Stage 1 is the most thoroughly checked; stages 2 and 3 run end to end at laptop scale. The current state of every physics check is in **[evals/REGISTRY.md](evals/REGISTRY.md)** (generated; failing evals stay listed as failing), and every design choice and known limit is in **[ROADMAP.md](ROADMAP.md)**.
+
+Things to know before trusting a number:
+
+- **Full-wave simulation at full resolution is not a laptop job** (about 300 core-hours for 128 elements at 2 MHz). The fast `ray` backend (delay, absorption and interface loss; no refraction, no reverberation) produces the data; k-Wave is the small-scale reference it is checked against.
+- **Several material constants and defaults are marked `assumed, to verify`** in the configs, and decisions D-011 and D-014 in the ROADMAP need the team's confirmation.
+- **The diffusion prior is small and trained only on this simulator's procedural CBV maps.** Read the reconstruction results with that in mind.
+
+## Getting started
+
+Python 3.10 or later. From the repository root:
+
+```
+# with conda (Windows, macOS, Linux)
+conda create -n neurosim python=3.11
+conda activate neurosim
+pip install -e ".[recon,dev]"
+
+# or with uv
+uv venv --python 3.11
+uv pip install -e ".[recon,dev]"
+```
+
+Check the install (about 10 seconds), then run the physics evals (several minutes):
+
+```
+python -m pytest tests/unit -q
+python scripts/run_evals.py
+python scripts/build_registry.py
+```
+
+One reproducible run: head, both ultrasound runs (with and without skull), CT and the CT-derived skull, from one config and one seed. Every script prints a cost estimate before it starts.
+
+```
+python scripts/run_pipeline.py --config configs/run_demo.yaml --seed 0 --out outputs/demo/run.h5
+python scripts/plot_run.py --run outputs/demo/run.h5 --out outputs/demo/run.png
+```
+
+A paired dataset, the prior and the reconstruction experiment:
+
+```
+python scripts/make_dataset.py --config configs/sweep_demo.yaml --seed 0 --out outputs/demo_sweep
+python scripts/make_prior_dataset.py --config configs/prior_default.yaml --seed 0 --out outputs/prior/dataset.h5
+python scripts/train_prior.py --config configs/prior_default.yaml --data outputs/prior/dataset.h5 --seed 0 --out outputs/prior/prior.pt
+python scripts/run_experiment.py --dataset outputs/demo_sweep --prior outputs/prior/prior.pt --config configs/recon_default.yaml --seed 0 --out outputs/experiment
+```
+
+Single parts can be run alone: `scripts/generate_head.py`, `scripts/plot_head.py`, `scripts/run_ct.py`, `scripts/compute_bank.py`, `scripts/run_fus.py`. `outputs/` is git-ignored.
+
+## Repository layout
 
 ```
 neuro-proj/
 ├── README.md               project overview (this file)
 ├── ROADMAP.md              plan, design decisions, change log
+├── CLAUDE.md               working rules: evals, code quality, rigor
+├── docs/ARCHITECTURE.md    module boundaries and data contracts
 ├── project-proposal.pdf    proposal, page 1
-├── pyproject.toml          package + pinned dependencies
+├── pyproject.toml          package and pinned dependencies
 ├── configs/                YAML configs; one file = one reproducible run
 ├── src/neurosim/
-│   ├── common/             seeding, units, I/O, config schema
+│   ├── common/             seeding, units, constants, config, grids, I/O, eval harness
 │   ├── head/               3D anatomy, skull microstructure, material maps, CBV signal
-│   ├── fus/                transducer, acoustic solver backends, beamforming, Doppler
-│   └── ct/                 X-ray spectrum, attenuation, projector, reconstruction
-├── scripts/                command-line entry points (generate head, run fUS, run CT)
-└── tests/                  physics sanity checks and determinism tests
+│   ├── fus/                transducer, Green's-bank backends, synthesis, beamforming, Doppler
+│   ├── ct/                 X-ray spectrum, attenuation, projector, reconstruction, HU to acoustics
+│   ├── data/               pipeline, CT-derived skull prior, sweeps, dataset format
+│   └── recon/              diffusion prior, baselines, posterior sampling, calibration, metrics
+├── scripts/                command-line entry points
+├── tests/unit/             code checks (fast)
+└── evals/                  physics checks, one claim each; REGISTRY.md is generated
 ```
 
 ## Key references

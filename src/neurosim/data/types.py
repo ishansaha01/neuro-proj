@@ -15,7 +15,7 @@ import numpy as np
 
 from neurosim.common.grid import Grid2D, PlaneSpec
 from neurosim.fus.config import ImagingConfig
-from neurosim.fus.types import GreensBank
+from neurosim.fus.types import GreensBank, PhaseScreen
 
 # Beamformer keys. Each names one way of turning channel data into an image.
 SKULL_DAS = "skull_das"  # real skull, conventional DAS at C_REF (what a scanner gives)
@@ -23,22 +23,6 @@ SKULL_CT = "skull_ct"  # real skull, beamformed with the CT-derived skull model 
 SKULL_TRUE = "skull_true"  # real skull, beamformed with the true skull model (baseline)
 CLEAN_DAS = "clean_das"  # skull removed, conventional DAS (the paired clean target)
 BEAMFORMERS: tuple[str, ...] = (SKULL_DAS, SKULL_CT, SKULL_TRUE, CLEAN_DAS)
-
-
-@dataclass(frozen=True)
-class PhaseScreen:
-    """Low-dimensional skull model: one delay and one amplitude per array element.
-
-    Applied to a bank as `B * amplitude_e * exp(+i 2 pi f delay_e)`
-    (`neurosim.fus.screen.apply_phase_screen`).
-
-    Attributes:
-        delays: extra one-way delay per element [s], float64, shape (n_elements,).
-        amplitudes: one-way amplitude factor per element (dimensionless, > 0), shape (n_elements,).
-    """
-
-    delays: np.ndarray
-    amplitudes: np.ndarray
 
 
 @dataclass(frozen=True)

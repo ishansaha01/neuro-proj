@@ -3,39 +3,28 @@
 Usage: ``python scripts/compute_bank.py --medium plane.h5 --config bank.yaml --out bank.h5``.
 Prints the cost estimate before running; ``--estimate-only`` stops there.
 
-The plane-medium bundle holds one dataset per array field of
-`neurosim.head.types.PlaneMedium` and the attributes ``grid_shape``,
-``grid_spacing``, ``grid_origin``, ``alpha_power``, ``plane_origin``,
-``plane_u_lateral`` and ``plane_u_depth``. The job config is the YAML form of
-`BankJob` below.
+The plane medium is a bundle written by `neurosim.head.io.save_plane_medium`; the bank is
+written with `neurosim.fus.io.save_bank`. The job config is the YAML form of `BankJob` below.
 """
 
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import logging
-import os
 import sys
 from dataclasses import dataclass
 
 import numpy as np
 
 from neurosim.common.config import field, from_dict, load_yaml
-from neurosim.common.grid import Grid2D, PlaneSpec
-from neurosim.common.io import load_bundle, provenance, save_bundle
+from neurosim.common.grid import Grid2D
+from neurosim.common.io import load_bundle, provenance
 from neurosim.fus.backends import BackendConfig, compute_bank, estimate_cost
+from neurosim.fus.io import save_bank
 from neurosim.fus.types import Transducer
-from neurosim.head.types import PlaneMedium
+from neurosim.head.io import plane_medium_from_bundle
 
 _BYTES_PER_GIB = 2**30
-
-# Fields of `PlaneMedium` stored as datasets (everything except the grid, the plane and scalars).
-_ARRAY_FIELDS: tuple[str, ...] = tuple(
-    f.name
-    for f in dataclasses.fields(PlaneMedium)
-    if f.name not in ("grid", "plane", "alpha_power")
-)
 
 
 @dataclass(frozen=True)
@@ -66,29 +55,6 @@ class BankJob:
     backend: BackendConfig = field(default_factory=BackendConfig, doc="Backend and its settings.")
 
 
-def load_plane_medium(path: str | os.PathLike[str]) -> tuple[PlaneMedium, int]:
-    """Read a plane-medium bundle (module docstring).
-
-    Returns the medium and the root seed stored with it (0 if the bundle has none).
-    """
-    arrays, attrs = load_bundle(path)
-    medium = PlaneMedium(
-        grid=Grid2D(
-            shape=tuple(attrs["grid_shape"]),
-            spacing=attrs["grid_spacing"],
-            origin=tuple(attrs["grid_origin"]),
-        ),
-        plane=PlaneSpec(
-            origin=tuple(attrs["plane_origin"]),
-            u_lateral=tuple(attrs["plane_u_lateral"]),
-            u_depth=tuple(attrs["plane_u_depth"]),
-        ),
-        alpha_power=attrs["alpha_power"],
-        **{name: arrays[name] for name in _ARRAY_FIELDS},
-    )
-    return medium, int(attrs.get("root_seed", 0))
-
-
 def main(argv: list[str]) -> int:
     """Run one bank computation from the command line; return the exit code."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -104,7 +70,8 @@ def main(argv: list[str]) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     job = from_dict(BankJob, load_yaml(args.config))
-    medium, root_seed = load_plane_medium(args.medium)
+    medium_arrays, medium_attrs = load_bundle(args.medium)
+    medium = plane_medium_from_bundle(medium_arrays, medium_attrs)
     roi = Grid2D.from_extent(job.roi.x_range, job.roi.z_range, job.roi.spacing)
     freqs = np.linspace(job.frequencies.first, job.frequencies.last, job.frequencies.count)
 
@@ -118,20 +85,8 @@ def main(argv: list[str]) -> int:
         return 0
 
     bank = compute_bank(medium, job.transducer, roi, freqs, job.backend)
-    arrays = {"B": bank.B, "freqs": bank.freqs}
-    if bank.static_fmc is not None:
-        arrays["static_fmc"] = bank.static_fmc
     # The bank computation draws no random numbers; the seed is that of the medium.
-    attrs = provenance(job, root_seed)
-    attrs.update(
-        roi_shape=list(roi.shape),
-        roi_spacing=roi.spacing,
-        roi_origin=list(roi.origin),
-        c_ref=bank.c_ref,
-        backend=bank.backend,
-        meta=bank.meta,
-    )
-    save_bundle(args.out, arrays, attrs)
+    save_bank(args.out, bank, provenance(job, medium_attrs["root_seed"]))
     print(f"saved {args.out}: B of shape {bank.B.shape}")
     return 0
 

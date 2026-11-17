@@ -1,0 +1,51 @@
+# Demo run: a representative transcranial scene. Measured on the 2-core development machine
+# (2026-11-17, seed 0): 146 s single-threaded, 1.3 GiB peak memory, a 0.5 GB bundle
+# (scripts/run_pipeline.py prints the estimate before it starts).
+#   python scripts/run_pipeline.py --config configs/run_demo.yaml --seed 0 --out outputs/demo/run.h5 --save-media
+#   python scripts/plot_run.py --run outputs/demo/run.h5 --out outputs/demo/run.png
+# The ROADMAP array (128 elements at 2 MHz, 9 plane waves over +-10 degrees) and the default
+# 0.5 mm box head, with the ray backend and statistical fidelity.
+#
+# The pixel grid is the grid of the diffusion prior (configs/prior_default.yaml,
+# neurosim.recon.cbv_images.pixel_grid): 32 x 32 pixels of 1 mm, top row at z = 12 mm,
+# centred on x = 0. The fUS pixel grid is always centred on the ROI, so the ROI below is
+# chosen symmetric about that grid (1.5 mm in depth and 0.5 mm laterally beyond its outer
+# pixel centres, so that it holds the outer pixel cells);
+# tests/unit/data/test_configs.py checks that the two grids are equal bit for bit.
+# Keys left out keep the defaults of neurosim.data.config.RunConfig and its nested configs.
+head:
+  grid:
+    spacing: 0.5e-3
+    region: box
+    box_size: [0.08, 0.08, 0.08]
+    box_center_depth: 0.025
+imaging:
+  transducer:
+    n_elements: 128
+    center_frequency: 2.0e6      # Hz
+  frequencies:
+    n_frequencies: 136           # the 34 mm deep ROI needs at least 132 (fus.window)
+  roi:
+    x_range: [-0.016, 0.016]     # m
+    z_range: [0.0105, 0.0445]    # m
+    spacing: 1.0e-3
+  pixels:
+    shape: [32, 32]
+    spacing: 1.0e-3
+  noise:
+    # 30 dB above the fus default of -10 dB; assumed, to verify. At 2 MHz the skull of this
+    # head costs about 33 dB two-way, so -10 dB leaves the uncorrected blood signal about
+    # 35 dB under the noise floor (nothing to reconstruct), while 20 dB puts it a few dB
+    # under the floor: the regime in which transcranial Doppler is just workable.
+    electronic_snr_db: 20.0
+  fidelity: statistical
+backend:
+  backend: ray
+ct_prior:
+  slab_half_slices: 0            # only the central slice enters the plane's medium
+medium_spacing: 1.0e-4           # m
+source_refinement: 2             # 0.5 mm sub-cells; one sample per 1 mm pixel overstates the
+                                 # clean blood signal 2.2 times, 2 x 2 is within 1 % of 4 x 4
+trials:
+  n_images: 60
+  image_interval: 2.0            # s: 0 to 118 s, three 20 s task blocks and the rests between
