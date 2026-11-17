@@ -12,26 +12,178 @@ double sum over angles and elements separates:
 
 These are the same factors and weights that `channel_spectra` and `beamform`
 use, combined in a different order; eval E-FUS-013 checks the two paths agree.
+
+Factorised form. With `T[f, a, s] = sum_e D[f, a, e] G[f, e, s]` (`D` the firing
+phasors of `synthesis.transmit_phasors`), every term is a chain of matrix
+products over the element index:
+
+    A = sum_f P(f) * (tx_w[f]^T D[f] G[f]) o (rx_w[f]^T G[f])        (o: elementwise)
+
+A per-element complex factor `u[f, e]` on the medium (a phase screen,
+`fus.screen`: `G -> u G`, on transmit and on receive by reciprocity) therefore
+enters as a diagonal scaling between two of these products,
+
+    A(u) = sum_f P(f) * (tx_w[f]^T (D[f] diag(u[f])) G[f]) o ((rx_w[f]^T diag(u[f])) G[f])
+
+`operator_factors` exports `P`, `tx_w`, `D`, `rx_w` and `G`; `psf_operator`
+contracts the same arrays with `u = 1`. `recon.forward` contracts them in torch
+for any `u` (eval E-RECON-005).
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from dataclasses import dataclass
+
 import numpy as np
 
 from neurosim.common.grid import Grid2D
-from neurosim.fus.beamform import make_beamformer
+from neurosim.fus.beamform import Beamformer, make_beamformer
 from neurosim.fus.config import BeamformingConfig
-from neurosim.fus.greens import check_same_sampling
+from neurosim.fus.greens import check_same_sampling, medium_greens
 from neurosim.fus.pulse import pulse_spectrum
-from neurosim.fus.synthesis import unit_scatterer_factors
+from neurosim.fus.synthesis import transmit_phasors
 from neurosim.fus.types import GreensBank, PlaneWaveSequence
 
 # Frequencies handled per pass, as a count of complex Green's-function values
 # (frequencies * n_elements * sources); 4e6 values are 64 MB.
 _CHUNK_VALUES = 4_000_000
+# The same count for `operator_factors`, which holds its complex64 result besides the
+# working arrays of a pass (complex128, and several times larger inside `reference_greens`).
+_EXPORT_CHUNK_VALUES = 1_000_000
 # Fewest frequencies per pass: with several, the last pass still has at least two,
 # which `reference_greens` needs for its fast route.
 _MIN_CHUNK = 4
+
+
+@dataclass(frozen=True)
+class OperatorFactors:
+    """The per-frequency arrays whose products give the point-spread operator.
+
+    With a per-element factor `u[f, e]` on the medium (`u = 1`: the bank itself),
+
+        A[p, s] = sum_f pulse[f] * transmit[f, p, s] * receive[f, p, s]
+        transmit[f] = tx_weights[f].T @ ((tx_phasors[f] * u[f]) @ greens[f])
+        receive[f]  = (rx_weights[f].T * u[f]) @ greens[f]
+
+    Attributes:
+        freqs: frequencies [Hz], float64, shape (nf,).
+        pulse: two-way pulse spectrum `P(f)`, float64, shape (nf,).
+        tx_weights: transmit beamforming weights, complex64, shape (nf, n_angles, n_pix).
+        tx_phasors: firing phasors `exp(+i w d_e(a))`, complex64, shape (nf, n_angles, n_elements).
+        rx_weights: receive beamforming weights (apodised, normalised), complex64,
+            shape (nf, n_elements, n_pix).
+        greens: one-way transfer function of the bank from every element to every
+            source point, complex64, shape (nf, n_elements, n_src).
+    """
+
+    freqs: np.ndarray
+    pulse: np.ndarray
+    tx_weights: np.ndarray
+    tx_phasors: np.ndarray
+    rx_weights: np.ndarray
+    greens: np.ndarray
+
+
+def _medium_factor_chunks(
+    bank: GreensBank,
+    sequence: PlaneWaveSequence,
+    sources: np.ndarray,
+    chunk_values: int | None = None,
+) -> Iterator[tuple[slice, np.ndarray, np.ndarray]]:
+    """The medium-side factors of the operator, a few frequencies at a time.
+
+    Yields `(freq_slice, tx_phasors, greens)`: the firing phasors, complex128,
+    shape (n_selected, n_angles, n_elements), and the bank's transfer function to
+    the source points, complex128, shape (n_selected, n_elements, n_src). The
+    slices are contiguous and cover the frequency grid; a slice holds about
+    `chunk_values` Green's-function values (default `_CHUNK_VALUES`).
+    """
+    nf, n_elements = bank.B.shape[:2]
+    budget = _CHUNK_VALUES if chunk_values is None else chunk_values
+    n_chunks = int(np.ceil(nf / max(_MIN_CHUNK, budget // (n_elements * sources.shape[0]))))
+    bounds = np.linspace(0, nf, n_chunks + 1).astype(int)
+    phasors = transmit_phasors(bank, sequence)
+    for start, stop in zip(bounds[:-1], bounds[1:]):
+        freq_slice = slice(int(start), int(stop))
+        yield freq_slice, phasors[freq_slice], medium_greens(bank, sources, freq_slice)
+
+
+def _check_inputs(bank: GreensBank, model_bank: GreensBank) -> np.ndarray:
+    """Check the two banks match and return the pulse spectrum on their frequency grid."""
+    check_same_sampling(bank, model_bank)
+    return pulse_spectrum(bank.transducer, bank.freqs)
+
+
+def operator_factors(
+    bank: GreensBank,
+    pixel_grid: Grid2D,
+    sources: np.ndarray,
+    model_bank: GreensBank,
+    sequence: PlaneWaveSequence,
+    beamforming: BeamformingConfig = BeamformingConfig(),
+    beamformer: Beamformer | None = None,
+) -> OperatorFactors:
+    """The arrays `psf_operator` multiplies together, for assembly outside this package.
+
+    Memory: `greens` holds nf * n_elements * n_src complex64 values and the two
+    weight arrays nf * (n_angles + n_elements) * n_pix. To keep `greens` small the
+    sources can be exported in several calls that share the weights (`beamformer`).
+
+    Args:
+        bank: the medium behind the per-element factor (the homogeneous bank for a
+            phase screen in the reference medium).
+        pixel_grid: image grid.
+        sources: scatterer positions [m], shape (n_src, 2), columns (x, z).
+        model_bank: the medium the beamformer assumes.
+        sequence: gives the steering angles.
+        beamforming: receive aperture options.
+        beamformer: weights of an earlier call with the same `pixel_grid`, `model_bank`,
+            `sequence` and `beamforming` (`make_beamformer`), to avoid recomputing them;
+            None = compute them.
+    """
+    pulse = _check_inputs(bank, model_bank)
+    if beamformer is None:
+        beamformer = make_beamformer(pixel_grid, model_bank, sequence, beamforming)
+    sources = np.asarray(sources, dtype=np.float64).reshape(-1, 2)
+    nf, n_elements = bank.B.shape[:2]
+    tx_phasors = np.empty((nf, len(sequence.angles_deg), n_elements), dtype=np.complex64)
+    greens = np.empty((nf, n_elements, sources.shape[0]), dtype=np.complex64)
+    for freq_slice, chunk_phasors, chunk_greens in _medium_factor_chunks(
+        bank, sequence, sources, _EXPORT_CHUNK_VALUES
+    ):
+        tx_phasors[freq_slice] = chunk_phasors
+        greens[freq_slice] = chunk_greens
+    return OperatorFactors(
+        freqs=np.asarray(bank.freqs, dtype=np.float64),
+        pulse=pulse,
+        tx_weights=beamformer.tx_weights,
+        tx_phasors=tx_phasors,
+        rx_weights=beamformer.rx_weights,
+        greens=greens,
+    )
+
+
+def _accumulate_operator(
+    operator: np.ndarray,
+    beamformer: Beamformer,
+    pulse: np.ndarray,
+    freq_slice: slice,
+    tx_phasors: np.ndarray,
+    greens: np.ndarray,
+) -> None:
+    """Add the terms of one frequency chunk (`u = 1` in `OperatorFactors`) to `operator`."""
+    transmit = np.matmul(tx_phasors, greens)
+    transmit_part = np.empty(operator.shape, dtype=np.complex64)
+    receive_part = np.empty(operator.shape, dtype=np.complex64)
+    for offset, f in enumerate(range(freq_slice.start, freq_slice.stop)):
+        np.matmul(
+            beamformer.tx_weights[f].T, transmit[offset].astype(np.complex64), out=transmit_part
+        )
+        np.matmul(beamformer.rx_weights[f].T, greens[offset].astype(np.complex64), out=receive_part)
+        transmit_part *= receive_part
+        transmit_part *= np.float32(pulse[f])
+        operator += transmit_part
 
 
 def psf_operator(
@@ -58,30 +210,13 @@ def psf_operator(
     Returns:
         complex64 array, shape (n_pix, n_src), pixels and sources in C order of their grids.
     """
-    check_same_sampling(bank, model_bank)
+    pulse = _check_inputs(bank, model_bank)
     beamformer = make_beamformer(pixel_grid, model_bank, sequence, beamforming)
     sources = source_grid.points().reshape(-1, 2)
-    pulse = pulse_spectrum(bank.transducer, bank.freqs)
-    nf, n_elements = bank.B.shape[:2]
     n_pix, n_src = beamformer.rx_weights.shape[2], sources.shape[0]
-
     operator = np.zeros((n_pix, n_src), dtype=np.complex64)
-    transmit_part = np.empty((n_pix, n_src), dtype=np.complex64)
-    receive_part = np.empty((n_pix, n_src), dtype=np.complex64)
-    n_chunks = int(np.ceil(nf / max(_MIN_CHUNK, _CHUNK_VALUES // (n_elements * n_src))))
-    bounds = np.linspace(0, nf, n_chunks + 1).astype(int)
-    for start, stop in zip(bounds[:-1], bounds[1:]):
-        transmit, receive = unit_scatterer_factors(bank, sequence, sources, slice(start, stop))
-        for offset, f in enumerate(range(start, stop)):
-            np.matmul(
-                beamformer.tx_weights[f].T, transmit[offset].astype(np.complex64), out=transmit_part
-            )
-            np.matmul(
-                beamformer.rx_weights[f].T, receive[offset].astype(np.complex64), out=receive_part
-            )
-            transmit_part *= receive_part
-            transmit_part *= np.float32(pulse[f])
-            operator += transmit_part
+    for freq_slice, tx_phasors, greens in _medium_factor_chunks(bank, sequence, sources):
+        _accumulate_operator(operator, beamformer, pulse, freq_slice, tx_phasors, greens)
     return operator
 
 

@@ -1,0 +1,41 @@
+# Reconstruction experiment on a dataset of neurosim.data.sweep (configs/sweep_demo.yaml:
+# 8 scenes, 128 elements, 136 frequencies, 32 x 32 pixels on the prior's grid, 40 trials).
+#   python scripts/run_experiment.py --dataset outputs/demo_sweep --prior outputs/prior/prior.pt \
+#       --config configs/recon_default.yaml --seed 0 --out outputs/experiment
+#   python scripts/plot_experiment.py --results outputs/experiment --out outputs/experiment/figure.png
+# Sized for about 20 minutes on the 2-core development machine with one thread (the script
+# prints an estimate first; measured times are in outputs/experiment/results.json).
+# Keys left out keep the defaults documented in neurosim.recon.config.
+source_refinement: 2        # must equal the dataset's RunConfig.source_refinement
+num_threads: 1
+dps:
+  n_steps: 25               # denoiser evaluations per posterior sample (ancestral steps)
+  eta: 1.0
+  guidance_scale: 1.0
+  max_step_ratio: 1.0
+  n_samples: 3              # posterior samples per trial
+calibration:
+  n_candidates: 2           # best-of-N
+  n_updates: 3              # screen updates per candidate, in the first 40 % of the reverse steps
+  update_until: 0.4
+  lbfgs_iterations: 8
+  delay_fit_shape: 3.0      # caps the confidence of the delay updates in the denoised image
+  n_pixels: 64              # measurement pixels in the screen objective
+  source_refinement: 1      # calibration forward model: one source point per pixel (run time)
+  coarse_modes: 4
+  max_delay_modes: 4
+  delay_prior_sigma: 100.0e-9
+  common_log_amplitude_prior_sigma: 1.5
+  gauge: mean_tilt
+  sampler:
+    n_steps: 30
+    n_samples: 4            # image chains sharing one screen estimate
+deconvolution:
+  n_iterations: 10
+metrics:
+  n_folds: 5
+  n_components: 10
+  t_threshold: 3.0
+  activation_threshold: 0.5
+  reference_threshold: 0.01
+  coverage_levels: [0.5, 0.8, 0.9]

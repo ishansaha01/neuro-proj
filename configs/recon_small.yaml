@@ -1,0 +1,53 @@
+# Reconstruction experiment on the SYNTHETIC phase-screen stand-in dataset
+# (neurosim.recon.synthetic): the skull is exactly a per-element delay and amplitude, so
+# the phase-screen model of the reconstruction has no model mismatch. Used to exercise the
+# experiment end to end and by the recon evals; it is not a simulation of a skull.
+#   python scripts/run_experiment.py --make-synthetic --dataset outputs/recon_synthetic \
+#       --prior outputs/prior/prior.pt --config configs/recon_small.yaml --seed 0 \
+#       --out outputs/experiment_synthetic
+#   python scripts/plot_experiment.py --results outputs/experiment_synthetic --out outputs/experiment_synthetic/figure.png
+# About 5 minutes for 4 scenes on the 2-core development machine (the script prints an
+# estimate). Keys left out keep the defaults of neurosim.recon.config.ReconConfig.
+source_refinement: 1
+dps:
+  n_steps: 25
+  n_samples: 3
+calibration:
+  n_candidates: 2
+  source_refinement: 1
+synthetic:
+  n_scenes: 4
+  run:
+    head:                          # the coarse head of the prior data set (configs/prior_default.yaml)
+      grid:
+        spacing: 1.0e-3
+        region: box
+        box_size: [0.06, 0.06, 0.06]
+        box_center_depth: 0.0255
+    imaging:
+      transducer:
+        n_elements: 48
+        fractional_bandwidth: 0.4  # narrower than the 0.6 default so that 64 frequencies
+                                   # cover the 31 mm deep ROI without range aliasing
+      sequence:
+        angles_deg: [-10.0, -5.0, 0.0, 5.0, 10.0]
+        n_frames: 100
+      frequencies:
+        n_frequencies: 64
+        truncation_db: 12.0
+      roi:                         # the pixel grid of the prior: 32 x 32 pixels of 1 mm from 12 mm
+        x_range: [-0.0155, 0.0155]
+        z_range: [0.012, 0.043]
+        spacing: 1.0e-3
+      pixels:
+        shape: [32, 32]
+        spacing: 1.0e-3
+      doppler:
+        n_discard: 2
+      noise:
+        electronic_snr_db: 20.0    # puts the uncorrected blood signal a few times above the floor
+      fidelity: statistical
+    source_refinement: 1
+    trials:
+      n_images: 30
+      image_interval: 4.0          # s: 0 to 116 s, three 20 s task blocks and the rests between
