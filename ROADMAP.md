@@ -29,53 +29,70 @@ This file is the project's working plan and its record of every change. It has t
 ### Phase 1 — Ground-truth head *(Tue 17 Nov)*
 Output: one HDF5/Zarr file per head holding 3D voxel maps on a common grid (default 0.5 mm isotropic), plus the config that made it.
 
-- [ ] **Anatomy (procedural):** nested ellipsoids for scalp, skull, CSF and brain. Smooth random deformation (Gaussian random field) of each surface, so every seed gives a different head shape. Skull thickness map with realistic regional variation, thinner at the temporal window.
-- [ ] **Skull microstructure:** three-layer skull (outer table, diploë, inner table). Porosity field φ(x) that is low in the tables and high in the diploë, with spatially correlated random texture.
-- [ ] **Material mapping:** derive every physical property from the microstructure (D-002):
+- [x] **Anatomy (procedural):** nested ellipsoids for scalp, skull, CSF and brain. Smooth random deformation (Gaussian random field) of each surface, so every seed gives a different head shape. Skull thickness map with realistic regional variation, thinner at the temporal window.
+- [x] **Skull microstructure:** three-layer skull (outer table, diploë, inner table). Porosity field φ(x) that is low in the tables and high in the diploë, with spatially correlated random texture.
+- [x] **Material mapping:** derive every physical property from the microstructure (D-002):
   - acoustic: sound speed c, density ρ, attenuation α (porosity mixing law, Aubry et al., 2003);
   - X-ray: volume fractions of soft tissue, water and bone mineral → μ(E) (used in Phase 3).
   - Hidden variation: add a component of sound speed that the CT cannot see, tuned so CT explains about 23–53% of sound-speed variance (Webb et al., 2018). This is what makes the CT an *imperfect* prior.
-- [ ] **CBV ground truth:** baseline vascular density map (higher in grey matter); a target region (default: a cortical patch, analogous to the parietal/motor areas decoded in Norman et al., 2021); task design → hemodynamic response function → ΔCBV(t) time series in the target. Blood speed field for the Doppler model.
+- [x] **CBV ground truth:** baseline vascular density map (higher in grey matter); a target region (default: a cortical patch, analogous to the parietal/motor areas decoded in Norman et al., 2021); task design → hemodynamic response function → ΔCBV(t) time series in the target. Blood speed field for the Doppler model.
 - [ ] **Real-data skull path (optional):** load skull geometry from MUG500+ (meshes and segmentations) or HU volumes from CQ500, so procedural and real skulls share one interface.
 - [ ] **Generative skull path (stretch):** SkullGAN (Naftchi-Ardebili et al., 2023) generates 2D skull CT slices; check whether weights are public and whether it can feed 2D imaging planes.
-- [ ] Sanity checks: layer thicknesses, property ranges and CT-vs-sound-speed R² checked against literature values; orthogonal-slice figures.
+- [x] Sanity checks: layer thicknesses, property ranges and CT-vs-sound-speed R² checked against literature values; orthogonal-slice figures.
 
 ### Phase 2 — fUS sensor model *(Tue 17 – Wed 18 Nov)*
 Output: per run, raw channel data (RF), beamformed IQ frames, a power Doppler image series, and the matching no-skull run.
 
-- [ ] **Imaging plane:** take a 2D plane through the 3D head under the probe (D-003). The probe position and angle are config parameters.
-- [ ] **Transducer:** 128-element linear array; centre frequency 2 MHz (sweep 1–3 MHz); pitch and element width set from wavelength; Gaussian-modulated pulse with set bandwidth; element directivity.
-- [ ] **Transmit sequence:** 7–11 plane waves over ±10°, coherent compounding; PRF and compounded frame rate set by imaging depth; Doppler ensemble length (e.g. a few hundred compounded frames per CBV image).
-- [ ] **Scatterers:** static tissue scatterers (speckle) plus moving blood scatterers whose number density follows CBV and which move with the blood speed field. Blood is a weak scatterer compared with tissue.
-- [ ] **Acoustic solver:** k-wave-python, pseudo-spectral, with heterogeneous c, ρ and power-law absorption (D-001). The same medium without the skull gives the paired clean run.
-- [ ] **Electronic noise:** additive, seeded, set by an SNR parameter.
-- [ ] **Processing chain:** delay-and-sum beamforming (assuming the brain's speed of sound, as a real scanner does), compounding, SVD clutter filter (Demené et al., 2015), power Doppler → CBV image.
+- [x] **Imaging plane:** take a 2D plane through the 3D head under the probe (D-003). The probe position and angle are config parameters.
+- [x] **Transducer:** 128-element linear array; centre frequency 2 MHz (sweep 1–3 MHz); pitch and element width set from wavelength; Gaussian-modulated pulse with set bandwidth; element directivity.
+- [x] **Transmit sequence:** 7–11 plane waves over ±10°, coherent compounding; PRF and compounded frame rate set by imaging depth; Doppler ensemble length (e.g. a few hundred compounded frames per CBV image).
+- [x] **Scatterers:** static tissue scatterers (speckle) plus moving blood scatterers whose number density follows CBV and which move with the blood speed field. Blood is a weak scatterer compared with tissue.
+- [x] **Acoustic solver:** k-wave-python, pseudo-spectral, with heterogeneous c, ρ and power-law absorption (D-001). The same medium without the skull gives the paired clean run.
+- [x] **Electronic noise:** additive, seeded, set by an SNR parameter.
+- [x] **Processing chain:** delay-and-sum beamforming (assuming the brain's speed of sound, as a real scanner does), compounding, SVD clutter filter (Demené et al., 2015), power Doppler → CBV image.
 - [ ] **Noise ablation switches:** each skull effect on or off on its own, for example a homogeneous skull with the same mean properties (no aberration), zero bone absorption (no attenuation), matched impedance (no reverberation).
-- [ ] **Fast path (from the proposal):** precompute the skull operator once per element and angle, then synthesize the echoes for any blood configuration linearly (Born approximation). Check against the full simulation on a small case. Estimate memory before building.
-- [ ] Sanity checks: point-spread function in water against theory; arrival-time shifts through a homogeneous slab against analytic values; attenuation against α·f·d; activation recovered in the no-skull case.
+  - *Built. Attenuation and reverberation switches have passing evals (E-DATA-006, E-FUS-006); the aberration switch does not (E-DATA-007 failing: homogenising the skull removes heterogeneity but not thickness-driven aberration).*
+- [x] **Fast path (from the proposal):** precompute the skull operator once per element and angle, then synthesize the echoes for any blood configuration linearly (Born approximation). Check against the full simulation on a small case. Estimate memory before building.
+- [x] Sanity checks: point-spread function in water against theory; arrival-time shifts through a homogeneous slab against analytic values; attenuation against α·f·d; activation recovered in the no-skull case.
 
 ### Phase 3 — CT scanner model *(Tue 17 – Wed 18 Nov)*
 Output: simulated CT volume in HU from the same head, plus the scan settings used.
 
-- [ ] **Source:** polyenergetic spectrum for a given kVp and filtration (SpekPy), default 120 kVp.
-- [ ] **Attenuation:** μ(E) per voxel from material fractions and mass-attenuation tables (NIST XCOM) for soft tissue, water and cortical bone.
-- [ ] **Projection:** fan-beam geometry per slice to start (3D cone beam later), ray-driven line integrals, polyenergetic Beer–Lambert, so beam hardening appears without extra modelling.
-- [ ] **Detector:** Poisson photon noise for a given tube current (mAs) and detector size; optional electronic noise.
-- [ ] **Reconstruction:** filtered back-projection with a choice of kernels (ramp, Shepp–Logan, Hann); calibration to HU with water and air.
-- [ ] **HU → acoustics:** the clinical linear HU-to-density/sound-speed map (Marquet et al., 2009), with constants randomized within published error bounds (Webb et al., 2018). This is the CT prior the reconstruction will use.
-- [ ] Sanity checks: water ≈ 0 HU and air ≈ −1000 HU; cortical bone HU in the published range; HU shifts with kVp and kernel in the direction Webb et al. report; R² of CT-derived vs true sound speed in the 23–53% band.
+- [x] **Source:** polyenergetic spectrum for a given kVp and filtration (SpekPy), default 120 kVp.
+- [x] **Attenuation:** μ(E) per voxel from material fractions and mass-attenuation tables (NIST XCOM) for soft tissue, water and cortical bone.
+- [x] **Projection:** fan-beam geometry per slice to start (3D cone beam later), ray-driven line integrals, polyenergetic Beer–Lambert, so beam hardening appears without extra modelling.
+- [x] **Detector:** Poisson photon noise for a given tube current (mAs) and detector size; optional electronic noise.
+- [x] **Reconstruction:** filtered back-projection with a choice of kernels (ramp, Shepp–Logan, Hann); calibration to HU with water and air.
+- [x] **HU → acoustics:** the clinical linear HU-to-density/sound-speed map (Marquet et al., 2009), with constants randomized within published error bounds (Webb et al., 2018). This is the CT prior the reconstruction will use.
+- [x] Sanity checks: water ≈ 0 HU and air ≈ −1000 HU; cortical bone HU in the published range; HU shifts with kVp and kernel in the direction Webb et al. report; R² of CT-derived vs true sound speed in the 23–53% band.
 
 ### Phase 4 — Dataset generation *(after Wednesday)*
-- [ ] Sweep driver: grid or random sweeps over skull seed, frequency, probe pose, target region and noise switches.
+- [x] Sweep driver: grid or random sweeps over skull seed, frequency, probe pose, target region and noise switches.
 - [ ] Paired dataset format: clean CBV, corrupted CBV, raw channel data, CT volume, ground-truth skull, and task labels per frame.
+  - *Built except raw channel data, which exist only as spectra inside the scatterer fidelity and are not stored. Statistical-fidelity speckle is too optimistic (E-FUS-022 failing, D-018).*
 - [ ] Brain activity from real task recordings (Rabut et al., 2024; Caltech primate data) instead of the synthetic HRF, so every frame carries a real label.
 
 ### Phase 5 — Reconstruction and evaluation *(after Wednesday)*
-- [ ] Baselines: no skull (upper bound); delay-and-sum with SVD filtering; CT-derived delay correction; true-skull correction.
+- [x] Baselines: no skull (upper bound); delay-and-sum with SVD filtering; CT-derived delay correction; true-skull correction.
 - [ ] Diffusion prior on clean CBV images.
+  - *Built and trained at CPU scale; E-RECON-001 failing (weak at high noise).*
 - [ ] Known-skull DPS, then uncertain-skull BlindDPS, then raw-channel guidance (stretch).
-- [ ] Metrics: decoding accuracy, activation-map overlap, CBV correlation, contrast, uncertainty calibration, runtime.
+  - *Known-skull DPS and a per-scene screen calibration are built. The uncertain-skull case does not work yet (E-RECON-008 failing; phase-screen model mismatch). Raw-channel guidance is not built.*
+- [x] Metrics: decoding accuracy, activation-map overlap, CBV correlation, contrast, uncertainty calibration, runtime.
 - [ ] Robustness: elastic solver with shear waves, perturbed HU maps, a different solver; then real transcranial data.
+
+### Open items *(as of 17 Nov, after the first full build)*
+
+Next steps, most important first:
+1. **Speckle model (D-018).** Set `doppler.effective_frames` from blood speed and ensemble duration, regenerate the datasets and re-run the experiment. Until then every reconstruction metric is flattered.
+2. **Refraction (D-019).** Add a bent-ray (eikonal) travel-time backend, or restrict the receive aperture to f-number 1.6 or more, or generate reference banks with k-Wave on a cropped grid.
+3. **Skull model for the uncertain-skull case.** The per-element phase screen cannot represent the simulated skull (operator error 0.985). Try a position-dependent amplitude and delay (a low-rank correction of the bank), then revisit calibration (E-RECON-008).
+4. **Noise level (D-017).** Tie `electronic_snr_db` to a measured transcranial sensitivity; it decides whether there is any signal to reconstruct.
+5. **Decoding metric.** With 40 trials and PCA(10) + LDA even the no-skull image decodes at 0.67. More trials or a decoder restricted to the activation region are needed before the headline metric means anything.
+6. **Confirm the choices in D-011 and D-014** (beamformer normalisation; material constants; the CT prior's absorption).
+7. **Evals to strengthen** (from the independent review): replace the self-comparing evals listed in the "Fixes from an independent review" entry; check k-Wave absorption at y = 1.1 and 1 to 3 MHz; add an absolute CT noise-level eval; run E-DATA-001 on more seeds.
+8. **Not built:** real-skull paths (MUG500+, CQ500, SkullGAN), real task recordings, cone-beam CT, raw-channel guidance, the elastic (shear-wave) robustness test, j-Wave.
+9. **Values marked `assumed, to verify`** are listed in each package's change-log entry and in the config field docs (`head/config.py`, `head/materials.py`, `fus/config.py`, `ct/config.py`, `data/config.py`, `recon/config.py`); each needs a source or a decision.
 
 ---
 
@@ -144,6 +161,11 @@ Through a flat 6.5 mm slab at 2500 m/s the straight-ray travel time is later tha
 ---
 
 ## 3. Change log
+
+### 2026-11-17 — Update milestone checklists and add open items
+- **What:** Ticked the Phase 1 to 5 checklist items that are built and have passing evals; left unticked, with a note, the items that are built but have a failing eval (noise ablation switches, paired dataset format, diffusion prior, uncertain-skull reconstruction). Added an "Open items" list of next steps in priority order.
+- **Why:** CLAUDE.md section 3: do not report a feature as done until its evals pass, and open a ROADMAP item for everything still to verify.
+- **Files:** `ROADMAP.md`.
 
 ### 2026-11-17 — Reconstruction and evaluation (Phase 5, second part)
 - **What:** Added the inverse-problem stage of `neurosim.recon`. `fus.operators.operator_factors` exports the per-frequency factors of the point-spread operator so that a per-element phase screen enters as a diagonal scaling; `psf_operator` contracts the same factors (output unchanged), so there is one physics implementation. `recon.forward` assembles `A(phi)` and `H(phi) = |A|^2` in torch, differentiable in delays and log amplitudes. `recon.likelihood` holds the gamma speckle likelihood used by every method. `recon.dps` does diffusion posterior sampling through the prior's guidance hook. `recon.baselines` has the four raw power Doppler images and a gamma maximum-likelihood multiplicative deconvolution with no learned prior. `recon.calibrate` and `recon.gauge` calibrate the skull phase screen once per scene from the time-averaged image (the skull is static), with coarse-to-fine modes, best-of-N selection and explicit gauge handling. `recon.metrics` has decoding accuracy (PCA + LDA), activation Dice, CBV correlation, contrast-to-noise, coverage and delay error. `recon.experiment`, `scripts/run_experiment.py`, `scripts/plot_experiment.py`, `configs/recon_{default,small}.yaml` and `recon.synthetic` complete the stage.
