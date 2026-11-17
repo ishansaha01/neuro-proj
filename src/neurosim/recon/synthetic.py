@@ -10,7 +10,8 @@ data functions the pipeline uses; only the skull is replaced:
   bias (the CT prior is imperfect, ROADMAP D-002 and D-014c);
 - no skull: the homogeneous bank.
 
-The CBV ground truth is the head model's, sampled on the pixel grid
+The CBV ground truth and the blood velocity (which sets the speckle statistics,
+`data.scene.speckle_frame_counts`) are the head model's, sampled on the pixel grid
 (`head.plane.sample_plane`), and the image series is `data.trials.simulate_trials`.
 A synthetic scene is not a simulation of a skull: there is no refraction, no
 position dependence of the aberration and no reverberation, so the phase-screen
@@ -39,7 +40,12 @@ from neurosim.common.io import provenance
 from neurosim.common.seeding import SeedTree
 from neurosim.data.config import RunConfig, trial_fidelity
 from neurosim.data.io import save_run
-from neurosim.data.scene import beamformer_banks, power_doppler_operator, probe_plane
+from neurosim.data.scene import (
+    beamformer_banks,
+    power_doppler_operator,
+    probe_plane,
+    speckle_frame_counts,
+)
 from neurosim.data.sweep import INDEX_NAME, scene_file
 from neurosim.data.trials import simulate_trials
 from neurosim.data.types import PhaseScreen, Scene, TrialSet
@@ -177,6 +183,13 @@ def synthetic_scene(cfg: SyntheticConfig, tree: SeedTree) -> Scene:
             setup.pixel_grid, model_bank, setup.sequence, run.imaging.beamforming
         )
         noise_floor[key] = (noise_variance * beamformer.noise_gain).reshape(-1).astype(np.float32)
+    effective_frames, noise_frames = speckle_frame_counts(
+        run.imaging,
+        setup.pixel_grid,
+        operators,
+        on_pixels.cbv_baseline,
+        on_pixels.blood_velocity,
+    )
 
     return Scene(
         imaging=run.imaging,
@@ -193,9 +206,8 @@ def synthetic_scene(cfg: SyntheticConfig, tree: SeedTree) -> Scene:
         screen_true=screen_true,
         operators=operators,
         noise_floor=noise_floor,
-        effective_frames=float(
-            run.imaging.doppler.effective_frames or run.imaging.sequence.n_frames
-        ),
+        effective_frames=effective_frames,
+        noise_frames=noise_frames,
         meta={
             "synthetic": True,
             "config_hash": config_hash(cfg),

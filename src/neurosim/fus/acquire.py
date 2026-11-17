@@ -2,9 +2,10 @@
 
 `scatterer`: explicit blood and tissue scatterers, frame by frame
 (`acquire_frames`, `acquire_power_doppler`). `statistical`: the expected image
-`H @ cbv` plus a noise floor, with gamma speckle (`statistical_power_doppler`).
-Both use the normalisation of `fus.config`, so they can be compared directly
-(eval E-FUS-014).
+`H @ cbv` plus a noise floor, with the speckle of correlated blood frames and
+independent noise frames (`statistical_power_doppler`; the frame counts come
+from `fus.speckle`). Both use the normalisation of `fus.config`, so they can be
+compared directly (evals E-FUS-014 for the mean, E-FUS-022 for the variance).
 
 Within a frame all transmits see the same scatterer positions (motion between
 the angles of one compound frame is neglected), and frame `n` is taken at
@@ -151,38 +152,67 @@ def statistical_power_doppler(
     H: np.ndarray,
     cbv_cells: np.ndarray,
     noise_floor: np.ndarray | float,
-    n_frames_effective: int,
+    blood_frames: np.ndarray | float,
+    noise_frames: float,
     rng: np.random.Generator,
 ) -> np.ndarray:
     """Power Doppler image at statistical fidelity.
 
-    The expected image is `H @ cbv_cells + noise_floor`. A pixel of one frame is
-    a circular complex Gaussian (many scatterers with random phases, plus noise),
-    so its power is exponentially distributed about that mean; the average of
-    `n` independent frames is gamma distributed with shape `n` and the same mean
-    (Goodman, Statistical Optics, 1985, on the sum of independent speckle
-    intensities).
+    Model. In every frame a pixel is the sum of a blood field and electronic
+    noise, both circular complex Gaussian, and the image is the mean power of the
+    `n` frames. With blood mean `b = H @ cbv_cells` and floor `f`:
+
+    1. The mean blood power of the ensemble, `I_b`, is drawn from a gamma
+       distribution with mean `b` and shape `blood_frames` (the number of
+       independent blood frames `N_b` of `fus.speckle`; first two moments exact,
+       gamma shape approximate).
+    2. The noise is independent from frame to frame and of the blood. Given the
+       blood, `|blood + noise|^2` of a frame is a scaled non-central chi-square
+       variable with 2 degrees of freedom, and the sum over frames depends on the
+       blood only through `I_b`:
+
+           I = f / (2 N_n) * chi'^2(2 N_n, non-centrality 2 N_n I_b / f),   N_n = noise_frames
+
+       This is exact for `N_n = n` and includes the interference of blood and
+       noise, which two independent gamma variables added would leave out.
+
+    Moments: `E[I] = b + f` exactly, and
+
+        var(I) = b^2 / N_b + (2 b f + f^2) / N_n
+
+    For `N_b = N_n = L` the image is exactly gamma distributed with shape `L`
+    about `b + f` (the model used before `fus.speckle` existed, with `L = n`).
 
     Not modelled: the spatial correlation of speckle between neighbouring pixels
-    (every pixel is drawn independently), the loss of blood and noise power in
-    the SVD filter, and the different number of independent frames of blood
-    (slow decorrelation) and noise (new in every frame).
+    (every pixel is drawn independently), and the loss of blood and noise power
+    in the SVD filter.
 
     Args:
         H: power Doppler operator (`operators.pd_operator`), shape (n_pix, n_src).
         cbv_cells: backscatter of each source cell, `cbv * cell_area` [m^2], shape (n_src,)
             or the shape of the source grid.
-        noise_floor: image noise power, scalar or shape (n_pix,) / (nz, nx):
+        noise_floor: image noise power `f`, scalar or shape (n_pix,) / (nz, nx):
             `electronic noise variance * Beamformer.noise_gain` (`fus.noise`).
-        n_frames_effective: independent speckle realisations averaged in the image.
+        blood_frames: independent frames of the blood signal, >= 1, scalar or shape
+            (n_pix,) (`fus.speckle.SpeckleFrames.blood`).
+        noise_frames: independent frames of the electronic noise, >= 1
+            (`fus.speckle.SpeckleFrames.noise`).
         rng: generator of the `speckle_statistical` stream.
 
     Returns:
         float64 array, shape (n_pix,).
     """
-    floor = np.broadcast_to(np.asarray(noise_floor, dtype=np.float64).reshape(-1), (H.shape[0],))
-    expected = H @ np.asarray(cbv_cells, dtype=np.float64).reshape(-1) + floor
-    return expected * rng.gamma(n_frames_effective, 1.0 / n_frames_effective, size=expected.shape)
+    n_pix = H.shape[0]
+    floor = np.broadcast_to(np.asarray(noise_floor, dtype=np.float64).reshape(-1), (n_pix,))
+    blood = H @ np.asarray(cbv_cells, dtype=np.float64).reshape(-1)
+    shape = np.broadcast_to(np.asarray(blood_frames, dtype=np.float64).reshape(-1), (n_pix,))
+    blood_power = blood * rng.gamma(shape, 1.0 / shape)
+    # Where there is no noise the image is the blood power itself; a unit floor keeps
+    # the arguments of the draw finite there, and the same numbers are drawn either way.
+    has_noise = floor > 0.0
+    scale = np.where(has_noise, floor, 1.0) / (2.0 * noise_frames)
+    with_noise = scale * rng.noncentral_chisquare(2.0 * noise_frames, blood_power / scale)
+    return np.where(has_noise, with_noise, blood_power)
 
 
 def estimate_cost(cfg: ImagingConfig, n_scatterers: int) -> dict[str, float]:

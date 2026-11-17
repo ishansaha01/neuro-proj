@@ -42,6 +42,7 @@ from neurosim.fus.io import load_bank
 from neurosim.fus.noise import electronic_noise_variance
 from neurosim.fus.operators import pd_operator, psf_operator
 from neurosim.fus.scatterers import blood_scatterers, tissue_amplitude, tissue_scatterers
+from neurosim.fus.speckle import speckle_frames
 from neurosim.fus.types import GreensBank
 from neurosim.head.io import load_plane_medium
 
@@ -133,11 +134,13 @@ def main(argv: list[str]) -> int:
             )
             variance = electronic_noise_variance(bank, setup.sequence, cfg.noise)
             floor = variance * beamformer.noise_gain
+        counts = speckle_frames(cfg, operator, cbv, velocity, source_grid)
         image = statistical_power_doppler(
             operator,
             cbv * source_grid.spacing**2,
             floor,
-            cfg.doppler.effective_frames or cfg.sequence.n_frames,
+            counts.blood,
+            counts.noise,
             tree.rng("speckle_statistical"),
         ).reshape(setup.pixel_grid.shape)
     else:

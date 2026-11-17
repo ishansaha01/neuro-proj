@@ -29,7 +29,8 @@ def _problem():
     measured = expected_power_doppler(
         operator, torch.from_numpy(truth).flatten(1), cell_area, floor
     )
-    return operator, floor, cell_area, truth, measured.reshape(2, 6, 6).numpy()
+    frames = (torch.full((n,), 10.0), 10.0)  # independent blood and noise frames
+    return operator, floor, cell_area, frames, truth, measured.reshape(2, 6, 6).numpy()
 
 
 def test_raw_power_doppler_returns_every_beamformer(tiny_run):
@@ -41,21 +42,32 @@ def test_raw_power_doppler_returns_every_beamformer(tiny_run):
 
 
 def test_deconvolution_recovers_noiseless_truth_and_stays_non_negative():
-    operator, floor, cell_area, truth, measured = _problem()
+    operator, floor, cell_area, frames, truth, measured = _problem()
     estimate = gamma_deconvolution(
-        operator, floor, cell_area, measured, DeconvolutionConfig(n_iterations=3000)
+        operator, floor, cell_area, *frames, measured, DeconvolutionConfig(n_iterations=3000)
     )
     assert estimate.shape == truth.shape and estimate.min() >= 0.0
     np.testing.assert_allclose(estimate, truth, rtol=0.02)
+    # Noiseless data are fitted exactly whatever the per-pixel frame counts weight.
+    uneven = torch.linspace(1.0, 40.0, operator.shape[0])
+    weighted = gamma_deconvolution(
+        operator, floor, cell_area, uneven, 200.0, measured, DeconvolutionConfig(n_iterations=3000)
+    )
+    np.testing.assert_allclose(weighted, truth, rtol=0.02)
 
 
 def test_updates_increase_the_likelihood_of_the_shared_definition():
-    operator, floor, cell_area, _, measured = _problem()
+    operator, floor, cell_area, frames, _, measured = _problem()
     y = torch.from_numpy(measured).flatten(1)
     values = []
     for n_iterations in (1, 5, 25, 125):
         estimate = gamma_deconvolution(
-            operator, floor, cell_area, measured, DeconvolutionConfig(n_iterations=n_iterations)
+            operator,
+            floor,
+            cell_area,
+            *frames,
+            measured,
+            DeconvolutionConfig(n_iterations=n_iterations),
         )
         expected = expected_power_doppler(
             operator, torch.from_numpy(estimate).flatten(1), cell_area, floor
@@ -65,12 +77,12 @@ def test_updates_increase_the_likelihood_of_the_shared_definition():
 
 
 def test_first_iterate_is_a_flat_image_matched_to_the_mean_power():
-    operator, floor, cell_area, _, measured = _problem()
+    operator, floor, cell_area, frames, _, measured = _problem()
     flat = np.broadcast_to(measured.mean(axis=(1, 2), keepdims=True), measured.shape).copy()
     # For a flat measurement and an operator with (nearly) equal row sums the flat start is
     # (nearly) a fixed point: one update leaves the image flat within the edge effect.
     estimate = gamma_deconvolution(
-        operator, floor, cell_area, flat, DeconvolutionConfig(n_iterations=1)
+        operator, floor, cell_area, *frames, flat, DeconvolutionConfig(n_iterations=1)
     )
     interior = estimate.reshape(2, -1)[:, 2:-2]
     assert np.ptp(interior, axis=1).max() < 0.02 * interior.mean()

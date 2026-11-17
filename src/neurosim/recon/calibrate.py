@@ -21,7 +21,7 @@ operator parameters are both moved by the same data term,
   image uncertainty.
 - The image is guided by all pixels; the screen objective uses a random subset
   of pixels, for run time.
-- The delay updates use a gamma shape of at most
+- The delay updates limit the gamma shape of every pixel to
   `CalibrationConfig.delay_fit_shape`, far below that of the time-averaged
   image: the denoised image the delays are fitted to is uncertain in its fine
   structure, and with the full shape the Gaussian prior had no weight and single
@@ -96,7 +96,12 @@ from neurosim.recon.forward import (
     screen_tensors,
 )
 from neurosim.recon.gauge import gauge_free_basis
-from neurosim.recon.likelihood import gamma_deviance, gamma_log_likelihood
+from neurosim.recon.likelihood import (
+    gamma_log_likelihood,
+    power_doppler_deviance,
+    power_doppler_log_likelihood,
+    speckle_shape,
+)
 from neurosim.recon.seeding import SAMPLING_STREAM, torch_generator
 
 # A screen as tensors: delays [s] and log amplitudes, each of shape (n_elements,).
@@ -249,7 +254,8 @@ def calibrate_screen(
     mean_image: np.ndarray,
     noise_floor: np.ndarray,
     cell_area: float,
-    shape: float,
+    blood_frames: np.ndarray,
+    noise_frames: float,
     cfg: CalibrationConfig,
     tree: SeedTree,
     *sub: int,
@@ -265,8 +271,11 @@ def calibrate_screen(
     mean_image: `skull_das` power Doppler averaged over the trials, shape (nz, nx).
     noise_floor: floor of `skull_das`, shape (n_pix,).
     cell_area: area of one pixel [m^2].
-    shape: gamma shape of the averaged image, `effective_frames * n_trials`
+    blood_frames: independent blood frames of every pixel of the averaged image,
+        `Scene.effective_frames[skull_das] * n_trials`, shape (n_pix,)
         (`recon.likelihood` on the approximation).
+    noise_frames: independent noise frames of the averaged image,
+        `Scene.noise_frames * n_trials`.
     cfg: calibration settings.
     tree: seed tree of the reconstruction.
     *sub: sub-indices of the `recon_sampling` stream for this calibration.
@@ -279,13 +288,13 @@ def calibrate_screen(
     pixel_index = torch.sort(order[: min(cfg.n_pixels, n_pix)]).values
     measured = torch.from_numpy(np.ascontiguousarray(mean_image, dtype=np.float32)).reshape(-1)
     floor = torch.from_numpy(np.ascontiguousarray(noise_floor, dtype=np.float32))
+    blood = torch.from_numpy(np.ascontiguousarray(blood_frames, dtype=np.float32))
     sampler = cfg.sampler
     diffusion, transform = prior.diffusion, prior.transform
     following = next_timesteps(diffusion, sampler.n_steps)
     timesteps = diffusion.sampling_timesteps(sampler.n_steps)
     step_number = {t: number for number, t in enumerate(timesteps)}
     schedule = update_schedule(cfg)
-    delay_fit_shape = min(shape, cfg.delay_fit_shape)
     image_shape = (sampler.n_samples, 1, *prior.pixel_grid.shape)
 
     def cbv_cells(samples: torch.Tensor) -> torch.Tensor:
@@ -298,7 +307,8 @@ def calibrate_screen(
     def deviance_per_pixel(samples: torch.Tensor, operator: torch.Tensor) -> float:
         with torch.no_grad():
             expected = expected_power_doppler(operator, cbv_cells(samples), cell_area, floor)
-            return float(gamma_deviance(measured, expected, shape).mean()) / n_pix
+            deviance = power_doppler_deviance(measured, expected, floor, blood, noise_frames)
+            return float(deviance.mean()) / n_pix
 
     candidates, fits = [], []
     start_fit = math.nan
@@ -314,17 +324,24 @@ def calibrate_screen(
             if step in schedule:
                 cells = cbv_cells(x0_hat.detach())
                 # The amplitude update (no delay modes) keeps the full shape; see the config.
-                fit_shape = shape if schedule[step] == 0 else delay_fit_shape
+                limit_shape = schedule[step] > 0
 
                 def screen_log_likelihood(screen: Screen) -> torch.Tensor:
                     subset = power_doppler_operator(model, *screen, pixel_index).to(torch.float32)
                     expected = expected_power_doppler(subset, cells, cell_area, floor[pixel_index])
+                    fit_shape = speckle_shape(
+                        expected, floor[pixel_index], blood[pixel_index], noise_frames
+                    )
+                    if limit_shape:
+                        fit_shape = fit_shape.clamp(max=cfg.delay_fit_shape)
                     return gamma_log_likelihood(measured[pixel_index], expected, fit_shape).mean()
 
                 estimate.fit(screen_log_likelihood, schedule[step], cfg.lbfgs_iterations)
                 operator[0] = full_operator(estimate.detached_screen())
             expected = expected_power_doppler(operator[0], cbv_cells(x0_hat), cell_area, floor)
-            log_likelihood = gamma_log_likelihood(measured, expected, shape)
+            log_likelihood = power_doppler_log_likelihood(
+                measured, expected, floor, blood, noise_frames
+            )
             (gradient,) = torch.autograd.grad(log_likelihood.sum(), x_t)
             return guidance_correction(gradient, x_t, x0_hat, diffusion, t, following[t], sampler)
 

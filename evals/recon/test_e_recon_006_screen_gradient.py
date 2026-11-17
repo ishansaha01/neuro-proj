@@ -25,7 +25,7 @@ from neurosim.recon.forward import (
     scene_screen_model,
     screen_tensors,
 )
-from neurosim.recon.likelihood import gamma_log_likelihood
+from neurosim.recon.likelihood import power_doppler_log_likelihood
 from neurosim.recon.synthetic import synthetic_run
 
 EVAL_ID = "E-RECON-006"
@@ -64,11 +64,16 @@ def test_e_recon_006_screen_gradient():
     measured = torch.from_numpy(trials.power_doppler["skull_das"][:1].astype(np.float64))
     measured = measured.flatten(1)[:, pixel_index]
     floor = torch.from_numpy(scene.noise_floor["skull_das"].astype(np.float64))[pixel_index]
+    blood_frames = torch.from_numpy(scene.effective_frames["skull_das"].astype(np.float64))[
+        pixel_index
+    ]
 
     def log_likelihood(delays: torch.Tensor, log_amplitudes: torch.Tensor) -> torch.Tensor:
         operator = power_doppler_operator(model, delays, log_amplitudes, pixel_index)
         expected = expected_power_doppler(operator, cbv, scene.cell_area, floor)
-        return gamma_log_likelihood(measured, expected, scene.effective_frames).sum()
+        return power_doppler_log_likelihood(
+            measured, expected, floor, blood_frames, scene.noise_frames
+        ).sum()
 
     delays, log_amplitudes = (
         value.clone().requires_grad_(True) for value in screen_tensors(scene.screen_ct)

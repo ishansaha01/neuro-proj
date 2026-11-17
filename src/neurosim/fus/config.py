@@ -164,8 +164,12 @@ class DopplerConfig:
     effective_frames: Optional[int] = field(
         None,
         ge=1,
-        doc="statistical tier: number of independent speckle realisations averaged in one "
-        "power Doppler image; None = sequence.n_frames (fully decorrelated blood: an upper bound)",
+        doc="statistical tier: None (the default) derives the number of independent blood "
+        "frames of every pixel from the blood velocity, the ensemble and the resolution cell "
+        "(fus.speckle), and counts sequence.n_frames independent frames of electronic noise. "
+        "A number overrides both: every pixel is then gamma distributed with that shape, for "
+        "controlled experiments (sequence.n_frames stands for blood that is new in every "
+        "frame, an upper bound). Interpreted only by fus.speckle.speckle_frames",
     )
 
 
@@ -244,7 +248,8 @@ class ImagingConfig:
     noise: NoiseConfig = field(default_factory=NoiseConfig)
     scatterers: ScattererConfig = field(default_factory=ScattererConfig)
     fidelity: Literal["scatterer", "statistical"] = field(
-        "scatterer", doc="explicit moving scatterers, or H @ cbv with gamma speckle"
+        "scatterer",
+        doc="explicit moving scatterers, or H @ cbv with the speckle statistics of fus.speckle",
     )
 
     def __post_init__(self) -> None:

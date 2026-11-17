@@ -48,7 +48,7 @@ from neurosim.recon.forward import (
     scene_screen_operators,
     screen_tensors,
 )
-from neurosim.recon.likelihood import gamma_deviance
+from neurosim.recon.likelihood import power_doppler_deviance
 from neurosim.recon.metrics import (
     activation_cnr,
     activation_dice,
@@ -161,7 +161,8 @@ def _mean_deviance_per_pixel(
         np.ascontiguousarray(trials.power_doppler[SKULL_DAS], dtype=np.float32)
     ).flatten(1)
     expected = expected_power_doppler(operator, cbv, scene.cell_area, floor)
-    deviance = gamma_deviance(measured, expected, scene.effective_frames)
+    blood_frames = torch.from_numpy(np.ascontiguousarray(scene.effective_frames[SKULL_DAS]))
+    deviance = power_doppler_deviance(measured, expected, floor, blood_frames, scene.noise_frames)
     return float(deviance.mean()) / measured.shape[1]
 
 
@@ -194,6 +195,7 @@ def reconstruct_scene(
     n_trials = measured.shape[0]
     floor = torch.from_numpy(np.ascontiguousarray(scene.noise_floor[SKULL_DAS], dtype=np.float32))
     true_operator = torch.from_numpy(np.ascontiguousarray(scene.operators[SKULL_DAS]))
+    blood_frames = np.ascontiguousarray(scene.effective_frames[SKULL_DAS], dtype=np.float32)
     seconds: dict[str, float] = {}
 
     start = time.perf_counter()
@@ -207,7 +209,8 @@ def reconstruct_scene(
         measured.mean(axis=0),
         scene.noise_floor[SKULL_DAS],
         scene.cell_area,
-        scene.effective_frames * n_trials,
+        blood_frames * n_trials,
+        scene.noise_frames * n_trials,
         cfg.calibration,
         tree,
         Draw.CALIBRATION,
@@ -243,7 +246,13 @@ def reconstruct_scene(
     for name, operator in operators.items():
         start = time.perf_counter()
         images[f"deconv_{name}"] = gamma_deconvolution(
-            operator, floor, scene.cell_area, measured, cfg.deconvolution
+            operator,
+            floor,
+            scene.cell_area,
+            torch.from_numpy(blood_frames),
+            scene.noise_frames,
+            measured,
+            cfg.deconvolution,
         )
         seconds[f"deconv_{name}"] = time.perf_counter() - start + assembly_seconds[name]
         method = f"dps_{name}"
@@ -253,7 +262,8 @@ def reconstruct_scene(
             operator,
             floor,
             scene.cell_area,
-            scene.effective_frames,
+            torch.from_numpy(blood_frames),
+            scene.noise_frames,
             measured,
             cfg.dps,
             tree,

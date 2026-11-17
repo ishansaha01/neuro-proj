@@ -56,7 +56,8 @@ def test_any_statistical_image_can_be_regenerated_alone(small_cfg, small_run):
         scene.operators[SKULL_DAS].astype(np.float64),
         trials.cbv[image] * scene.cell_area,
         scene.noise_floor[SKULL_DAS],
-        scene.effective_frames,
+        scene.effective_frames[SKULL_DAS],
+        scene.noise_frames,
         SeedTree(SMALL_SEED).rng("speckle_statistical", image, key_number),
     )
     alone = alone.reshape(scene.pixel_grid.shape).astype(np.float32)
@@ -73,11 +74,17 @@ def test_statistical_images_scatter_about_the_expected_image(small_run):
     for key in BEAMFORMERS:
         operator = scene.operators[key].astype(np.float64)
         cells = trials.cbv.reshape(trials.cbv.shape[0], -1).astype(np.float64) * scene.cell_area
-        expected = cells @ operator.T + scene.noise_floor[key]
+        blood = cells @ operator.T
+        floor = scene.noise_floor[key].astype(np.float64)
+        expected = blood + floor
         ratio = trials.power_doppler[key].reshape(expected.shape) / expected
-        # Gamma speckle of shape 40 per pixel: 16 % per pixel, 0.3 % over 12 x 256 pixels.
-        assert ratio.mean() == pytest.approx(1.0, abs=0.02)
-        assert ratio.std() == pytest.approx(1.0 / np.sqrt(scene.effective_frames), rel=0.1)
+        # Blood counts as `effective_frames` independent frames per pixel (about one in
+        # this 80 ms ensemble) and the noise as `noise_frames`: the variance of
+        # `fus.acquire.statistical_power_doppler`, pooled over 12 x 256 pixels.
+        blood_variance = blood**2 / scene.effective_frames[key]
+        variance = blood_variance + (2.0 * blood + floor) * floor / scene.noise_frames
+        assert ratio.mean() == pytest.approx(1.0, abs=0.05)
+        assert ratio.var() == pytest.approx(np.mean(variance / expected**2), rel=0.2)
 
 
 def test_keys_and_images_get_independent_speckle(small_run):

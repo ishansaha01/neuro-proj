@@ -6,6 +6,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from scipy import stats
 
 from neurosim.common.seeding import SeedTree
 from neurosim.fus.acquire import (
@@ -152,26 +153,54 @@ def test_power_doppler_image(tiny, tiny_cfg, water, scene):
     assert np.all(image >= 0.0) and image.max() > 0.0
 
 
-def test_statistical_power_doppler_has_gamma_statistics():
-    rng = np.random.default_rng(0)
-    operator = rng.uniform(0.0, 1.0, size=(3, 5)).astype(np.float32)
-    cbv_cells = rng.uniform(0.0, 1.0, size=5)
-    floor = np.array([0.1, 0.2, 0.3])
-    expected = operator.astype(np.float64) @ cbv_cells + floor
-    n_effective = 12
-    draws = np.stack(
-        [
-            statistical_power_doppler(operator, cbv_cells, floor, n_effective, rng)
-            for _ in range(4000)
-        ]
+def test_statistical_power_doppler_has_the_two_component_moments():
+    """Mean `b + f` and variance `b^2 / N_b + (2 b f + f^2) / N_n`, per pixel."""
+    rng = SeedTree(0).rng("speckle_statistical")
+    blood = np.array([1.0, 1.0, 1.0, 0.0, 2.0])
+    floor = np.array([0.0, 2.0, 10.0, 1.0, 0.5])
+    blood_frames = np.array([3.0, 1.3, 2.0, 5.0, 40.0])
+    noise_frames = 40.0
+    n_draws = 60_000
+    operator = np.tile(blood[:, None], (n_draws, 1))  # every pixel n_draws times, one source
+    draws = statistical_power_doppler(
+        operator,
+        np.ones(1),
+        np.tile(floor, n_draws),
+        np.tile(blood_frames, n_draws),
+        noise_frames,
+        rng,
+    ).reshape(n_draws, 5)
+    variance = blood**2 / blood_frames + (2.0 * blood * floor + floor**2) / noise_frames
+    np.testing.assert_allclose(draws.mean(axis=0), blood + floor, rtol=0.01)
+    np.testing.assert_allclose(draws.var(axis=0), variance, rtol=0.05)
+    assert np.all(draws >= 0.0)
+
+
+def test_statistical_power_doppler_is_gamma_for_one_common_frame_count():
+    """With `N_b = N_n = L` the image is gamma distributed with shape `L` about `b + f`."""
+    rng = SeedTree(1).rng("speckle_statistical")
+    n_draws, frames = 20_000, 6.0
+    draws = statistical_power_doppler(
+        np.full((n_draws, 1), 2.0), np.ones(1), 1.0, frames, frames, rng
     )
-    assert draws.shape == (4000, 3)
-    np.testing.assert_allclose(draws.mean(axis=0), expected, rtol=0.03)
-    np.testing.assert_allclose(draws.var(axis=0) / expected**2, 1.0 / n_effective, rtol=0.15)
-    scalar_floor = statistical_power_doppler(operator, cbv_cells.reshape(5, 1), 0.5, 10**9, rng)
+    reference = stats.gamma(frames, scale=3.0 / frames)
+    assert stats.kstest(draws, reference.cdf).pvalue > 0.01
+    # An array of counts, a scalar floor and a CBV map of the source grid's shape are accepted.
+    operator = rng.uniform(0.0, 1.0, size=(3, 6)).astype(np.float32)
+    cbv_cells = rng.uniform(0.0, 1.0, size=(2, 3))
+    image = statistical_power_doppler(operator, cbv_cells, 0.5, np.full(3, 1e9), 1e9, rng)
     np.testing.assert_allclose(
-        scalar_floor, operator.astype(np.float64) @ cbv_cells + 0.5, rtol=1e-3
+        image, operator.astype(np.float64) @ cbv_cells.reshape(-1) + 0.5, rtol=1e-3
     )
+
+
+def test_statistical_power_doppler_is_seeded():
+    arguments = (np.eye(4), np.arange(1.0, 5.0), np.array([0.0, 0.1, 0.0, 0.2]), 2.5, 30.0)
+    first = statistical_power_doppler(*arguments, SeedTree(2).rng("speckle_statistical"))
+    again = statistical_power_doppler(*arguments, SeedTree(2).rng("speckle_statistical"))
+    other = statistical_power_doppler(*arguments, SeedTree(3).rng("speckle_statistical"))
+    np.testing.assert_array_equal(first, again)
+    assert not np.array_equal(first, other)
 
 
 def test_cost_estimate(tiny_cfg):

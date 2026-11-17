@@ -47,7 +47,7 @@ from neurosim.recon.checkpoint import Prior
 from neurosim.recon.config import DpsConfig
 from neurosim.recon.diffusion import GaussianDiffusion, Guidance, Model
 from neurosim.recon.forward import expected_power_doppler
-from neurosim.recon.likelihood import gamma_log_likelihood
+from neurosim.recon.likelihood import power_doppler_log_likelihood
 from neurosim.recon.seeding import SAMPLING_STREAM, torch_generator
 from neurosim.recon.transform import CbvTransform
 
@@ -168,27 +168,32 @@ def cbv_log_likelihood(
     cell_area: float,
     noise_floor: torch.Tensor,
     measured: torch.Tensor,
-    effective_frames: float,
+    blood_frames: torch.Tensor,
+    noise_frames: float,
 ) -> LogLikelihood:
     """Data term of power Doppler images for denoised CBV images in model space.
 
     The denoised image is mapped to physical CBV (`transform.to_physical`, negative
     values set to zero), pushed through the forward model
     (`recon.forward.expected_power_doppler`) and scored with
-    `recon.likelihood.gamma_log_likelihood`.
+    `recon.likelihood.power_doppler_log_likelihood`.
 
     transform: the prior's map between model space and CBV.
     operator: power Doppler operator, shape (n_selected, n_cells).
     cell_area: area of one CBV cell [m^2].
     noise_floor: floor of the selected pixels, shape (n_selected,).
     measured: measured images, shape (batch, n_selected).
-    effective_frames: gamma shape of the speckle.
+    blood_frames: independent blood frames of the selected pixels
+        (`Scene.effective_frames` of the measured image), shape (n_selected,).
+    noise_frames: independent noise frames (`Scene.noise_frames`).
     """
 
     def log_likelihood(x0_hat: torch.Tensor) -> torch.Tensor:
         cbv = transform.to_physical(x0_hat).clamp_min(0.0).flatten(1)
         expected = expected_power_doppler(operator, cbv, cell_area, noise_floor)
-        return gamma_log_likelihood(measured, expected, effective_frames)
+        return power_doppler_log_likelihood(
+            measured, expected, noise_floor, blood_frames, noise_frames
+        )
 
     return log_likelihood
 
@@ -203,7 +208,8 @@ def reconstruct_trials(
     operator: torch.Tensor,
     noise_floor: torch.Tensor,
     cell_area: float,
-    effective_frames: float,
+    blood_frames: torch.Tensor,
+    noise_frames: float,
     measured: np.ndarray,
     cfg: DpsConfig,
     tree: SeedTree,
@@ -219,7 +225,9 @@ def reconstruct_trials(
     operator: power Doppler operator `H`, float32, shape (n_pix, n_pix).
     noise_floor: float32, shape (n_pix,).
     cell_area: area of one pixel [m^2].
-    effective_frames: gamma shape of the speckle.
+    blood_frames: independent blood frames of every pixel of the measured image
+        (`Scene.effective_frames` of its beamformer key), float32, shape (n_pix,).
+    noise_frames: independent noise frames (`Scene.noise_frames`).
     measured: power Doppler images, shape (n_trials, nz, nx).
     cfg: sampler settings; `cfg.n_samples` samples per trial.
     tree: seed tree of the reconstruction.
@@ -235,7 +243,8 @@ def reconstruct_trials(
         cell_area,
         noise_floor,
         torch.from_numpy(np.ascontiguousarray(measured, dtype=np.float32)).flatten(1),
-        effective_frames,
+        blood_frames,
+        noise_frames,
     )
     clip = (prior.transform.model_floor, math.inf)
     samples = [

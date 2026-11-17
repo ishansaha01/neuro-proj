@@ -99,7 +99,10 @@ def test_cbv_log_likelihood_prefers_the_true_image():
     truth = torch.tensor([[0.02, 0.05, 0.1, 0.03]])
     floor = torch.full((4,), 1e-9)
     measured = truth * 1e-6 @ operator.T + floor
-    log_likelihood = cbv_log_likelihood(transform, operator, 1e-6, floor, measured, 50.0)
+    blood_frames = torch.tensor([1.5, 4.0, 12.0, 50.0])
+    log_likelihood = cbv_log_likelihood(
+        transform, operator, 1e-6, floor, measured, blood_frames, 50.0
+    )
     model_truth = transform.to_model(truth).reshape(1, 1, 2, 2)
     assert log_likelihood(model_truth) > log_likelihood(model_truth + 0.1)
     assert log_likelihood(model_truth) > log_likelihood(model_truth - 0.1)
@@ -123,7 +126,8 @@ def test_reconstruct_trials_shape_seed_and_sub_index(tiny_prior, tiny_run):
             operator,
             floor,
             scene.cell_area,
-            scene.effective_frames,
+            torch.from_numpy(scene.effective_frames["skull_das"]),
+            scene.noise_frames,
             measured,
             cfg,
             SeedTree(seed),

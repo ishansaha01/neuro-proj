@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from neurosim.common.config import config_hash, dump_yaml
-from neurosim.common.io import load_bundle
+from neurosim.common.io import load_bundle, save_bundle
 from neurosim.data.io import load_run, media_paths, save_run
 from neurosim.data.pipeline import run
 from neurosim.data.types import BEAMFORMERS, Scene, TrialSet
@@ -60,6 +60,41 @@ def test_bundle_carries_provenance_and_is_byte_deterministic(tmp_path, small_cfg
     assert "scene/bank_ct/B" in arrays and "trials/power_doppler/clean_das" in arrays
     # The estimated bundle size is the size of the file, to within its small overhead.
     assert scene.meta["cost"]["bundle_bytes"] == pytest.approx(first.stat().st_size, rel=0.05)
+
+
+def test_effective_frames_are_stored_per_beamformer_key(tmp_path, small_cfg, small_run):
+    scene, _, trials = small_run
+    path = tmp_path / "run.h5"
+    save_run(path, scene, trials, small_cfg, SMALL_SEED)
+    arrays, attrs = load_bundle(path)
+    assert attrs["noise_frames"] == scene.noise_frames
+    assert "effective_frames" not in attrs
+    for key in BEAMFORMERS:
+        stored = arrays[f"scene/effective_frames/{key}"]
+        assert stored.dtype == np.float32
+        np.testing.assert_array_equal(stored, scene.effective_frames[key])
+
+
+def test_bundle_without_per_pixel_effective_frames_is_refused(tmp_path, small_cfg, small_run):
+    """A bundle of the old format (one scalar attribute `effective_frames`) must not load."""
+    scene, _, trials = small_run
+    path, old_path = tmp_path / "run.h5", tmp_path / "old.h5"
+    save_run(path, scene, trials, small_cfg, SMALL_SEED)
+    arrays, attrs = load_bundle(path)
+    old_arrays = {
+        name: value for name, value in arrays.items() if "effective_frames" not in name
+    }
+    old_attrs = {name: value for name, value in attrs.items() if name != "noise_frames"}
+    old_attrs["effective_frames"] = float(small_cfg.imaging.sequence.n_frames)
+    save_bundle(old_path, old_arrays, old_attrs)
+    with pytest.raises(ValueError, match="independent-frame counts.*regenerate"):
+        load_run(old_path)
+    # One missing key is enough.
+    partial = dict(arrays)
+    del partial[f"scene/effective_frames/{BEAMFORMERS[0]}"]
+    save_bundle(old_path, partial, attrs)
+    with pytest.raises(ValueError, match="independent-frame counts"):
+        load_run(old_path)
 
 
 def test_media_paths_sit_next_to_the_run(tmp_path):

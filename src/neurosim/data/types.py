@@ -30,8 +30,11 @@ class Scene:
     """One skull, one probe placement, one imaging setup.
 
     The CBV image lives on `pixel_grid` (shape (nz, nx), n_pix = nz * nx, C order).
-    The expected blood power Doppler image for beamformer `k` is
-    `operators[k] @ (cbv.ravel() * cell_area) + noise_floor[k]`.
+    The expected power Doppler image for beamformer `k` is
+    `operators[k] @ (cbv.ravel() * cell_area) + noise_floor[k]`: blood plus
+    electronic noise. Its speckle (`fus.acquire.statistical_power_doppler`): the
+    blood part of pixel `p` has variance `blood_p^2 / effective_frames[k][p]`, and
+    the noise adds `(2 blood_p + floor_p) floor_p / noise_frames`.
 
     Attributes:
         imaging: the imaging configuration (array, sequence, frequencies, grids, noise).
@@ -49,7 +52,14 @@ class Scene:
         operators: power Doppler operator H = |A|^2 per beamformer key in `BEAMFORMERS`,
             float32, (n_pix, n_pix).
         noise_floor: electronic-noise power Doppler floor per beamformer key, float32, (n_pix,).
-        effective_frames: number of independent speckle realisations per image.
+        effective_frames: number of independent frames of the *blood* signal of every
+            pixel, per beamformer key, float32, (n_pix,), values in [1, n_frames]
+            (`fus.speckle`): from the in-plane blood velocity, the ensemble and the
+            resolution cell, mixed over the source cells each pixel sees with the weights
+            `operators[k] * cbv_baseline` (so it differs between beamformers). With the
+            override `imaging.doppler.effective_frames` every entry is that number.
+        noise_frames: number of independent frames of the electronic noise, the same for
+            every pixel and beamformer: `imaging.sequence.n_frames`, or the override.
         meta: provenance and diagnostics (config hash, seed, medium grid, cost, CT settings,
             R^2 of CT-derived vs true skull sound speed).
     """
@@ -68,7 +78,8 @@ class Scene:
     screen_true: PhaseScreen
     operators: dict[str, np.ndarray]
     noise_floor: dict[str, np.ndarray]
-    effective_frames: float
+    effective_frames: dict[str, np.ndarray]
+    noise_frames: float
     meta: dict[str, Any] = field(default_factory=dict)
 
 

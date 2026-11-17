@@ -49,6 +49,14 @@ def test_scene_follows_the_contract(tiny_run):
         assert scene.operators[key].shape == (256, 256) and scene.operators[key].dtype == np.float32
         assert scene.noise_floor[key].shape == (256,) and scene.noise_floor[key].min() > 0.0
     assert scene.cbv_baseline.shape == (16, 16) and scene.brain_mask.any()
+    # Independent blood frames per pixel and key, from the head model's blood velocity.
+    n_frames = scene.imaging.sequence.n_frames
+    assert set(scene.effective_frames) == set(BEAMFORMERS) and scene.noise_frames == n_frames
+    for key in BEAMFORMERS:
+        blood_frames = scene.effective_frames[key]
+        assert blood_frames.shape == (256,) and blood_frames.dtype == np.float32
+        assert blood_frames.min() >= 1.0 and blood_frames.max() <= n_frames
+        assert np.ptp(blood_frames) > 0.0
     assert trials.cbv.shape == (12, 16, 16) and trials.fidelity == "statistical"
     assert set(np.unique(trials.label)) == {0, 1}
     # The clean operator is the homogeneous one: the skull only attenuates and blurs.

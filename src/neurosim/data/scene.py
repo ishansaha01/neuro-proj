@@ -4,8 +4,8 @@
 
     head -> imaging plane -> fine plane medium -> skull-effect switches / skull removed
          -> Green's banks (true skull, no skull) -> CT prior medium -> its ray bank
-         -> beamformer per key of `data.types.BEAMFORMERS` -> power Doppler operator
-            and noise floor per key -> phase screens.
+         -> beamformer per key of `data.types.BEAMFORMERS` -> power Doppler operator,
+            noise floor and independent-frame counts per key -> phase screens.
 
 Beamformer keys and their banks (`beamformer_banks`): the channel data of
 `skull_das`, `skull_ct` and `skull_true` come from the true-skull bank and those
@@ -21,7 +21,8 @@ model equals the bank that made the data.
 Normalisation (`fus.config`, `fus.noise`): the expected power Doppler image of
 key `k` is `operators[k] @ (cbv * cell_area) + noise_floor[k]`, with
 `noise_floor[k] = electronic noise variance * Beamformer.noise_gain` and the
-same noise variance for every key.
+same noise variance for every key. The speckle about that mean is described by
+`effective_frames[k]` and `noise_frames` (`speckle_frame_counts`, `fus.speckle`).
 
 Seed streams: those of `head.generate.generate_head`, `ct_photon_noise` and
 (for a sampled HU mapping) `ct_hu_mapping`. Nothing here draws from the
@@ -56,10 +57,11 @@ from neurosim.fus.backends import BackendConfig, compute_bank
 from neurosim.fus.backends import estimate_cost as estimate_bank_cost
 from neurosim.fus.backends.phantoms import Material, slab_medium
 from neurosim.fus.beamform import make_beamformer
-from neurosim.fus.config import BeamformingConfig, ImagingSetup, imaging_setup
+from neurosim.fus.config import BeamformingConfig, ImagingConfig, ImagingSetup, imaging_setup
 from neurosim.fus.noise import electronic_noise_variance
 from neurosim.fus.operators import pd_operator, psf_operator
 from neurosim.fus.screen import fit_phase_screen
+from neurosim.fus.speckle import speckle_frames
 from neurosim.fus.types import GreensBank, Transducer
 from neurosim.head.ablations import apply_skull_effects, remove_skull
 from neurosim.head.config import HeadConfig
@@ -197,6 +199,37 @@ def power_doppler_operator(
     return operator
 
 
+def speckle_frame_counts(
+    imaging: ImagingConfig,
+    pixel_grid: Grid2D,
+    operators: dict[str, np.ndarray],
+    cbv_baseline: np.ndarray,
+    blood_velocity: np.ndarray,
+) -> tuple[dict[str, np.ndarray], float]:
+    """`Scene.effective_frames` and `Scene.noise_frames` for a set of operators.
+
+    `fus.speckle.speckle_frames` once per beamformer key, with the baseline CBV
+    and the blood velocity on the pixel grid (the source cells of the operators).
+
+    Args:
+        imaging: imaging configuration of the scene.
+        pixel_grid: grid of the CBV cells and of the image.
+        operators: power Doppler operator per beamformer key, (n_pix, n_pix) each.
+        cbv_baseline: resting CBV fraction, shape (nz, nx).
+        blood_velocity: in-plane blood velocity [m/s], shape (2, nz, nx), (vx, vz).
+
+    Returns:
+        `(effective_frames, noise_frames)`: independent blood frames per key, float32,
+        shape (n_pix,) each, and the independent noise frames.
+    """
+    counts = {
+        key: speckle_frames(imaging, operator, cbv_baseline, blood_velocity, pixel_grid)
+        for key, operator in operators.items()
+    }
+    (noise_frames,) = {count.noise for count in counts.values()}
+    return {key: count.blood for key, count in counts.items()}, noise_frames
+
+
 def _ray_backend(cfg: RunConfig) -> BackendConfig:
     """The ray backend with the run's ray settings: CT-derived bank and true-skull model."""
     return BackendConfig(backend="ray", ray=cfg.backend.ray)
@@ -257,6 +290,14 @@ def build_scene_with_extras(cfg: RunConfig, tree: SeedTree) -> tuple[Scene, Scen
         )
         noise_floor[key] = (noise_variance * beamformer.noise_gain).reshape(-1).astype(np.float32)
 
+    effective_frames, noise_frames = speckle_frame_counts(
+        cfg.imaging,
+        setup.pixel_grid,
+        operators,
+        on_pixels.cbv_baseline,
+        on_pixels.blood_velocity,
+    )
+
     mapping = prior_hu_mapping(cfg.ct, cfg.ct_prior, tree)
     meta = {
         "config_hash": config_hash(cfg),
@@ -294,9 +335,8 @@ def build_scene_with_extras(cfg: RunConfig, tree: SeedTree) -> tuple[Scene, Scen
         screen_true=fit_phase_screen(bank_skull),
         operators=operators,
         noise_floor=noise_floor,
-        effective_frames=float(
-            cfg.imaging.doppler.effective_frames or cfg.imaging.sequence.n_frames
-        ),
+        effective_frames=effective_frames,
+        noise_frames=noise_frames,
         meta=meta,
     )
     extras = SceneExtras(

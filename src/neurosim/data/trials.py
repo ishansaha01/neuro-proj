@@ -6,7 +6,8 @@ scene's pixel grid, and one power Doppler image is produced per beamformer key
 of `data.types.BEAMFORMERS`.
 
 Fidelity "statistical": `fus.acquire.statistical_power_doppler` with the
-scene's operator and noise floor of the key. The speckle of image `i` and key
+scene's operator, noise floor and independent blood frames of the key
+(`Scene.effective_frames`) and the scene's noise frames. The speckle of image `i` and key
 number `k` comes from the stream `("speckle_statistical", i, k)`, so any image
 can be regenerated alone. The three skull keys therefore get independent
 speckle, although a scanner would beamform one set of channel data three ways.
@@ -85,7 +86,8 @@ def _statistical_images(scene: Scene, cbv: np.ndarray, tree: SeedTree) -> dict[s
                     operator,
                     image_cbv * scene.cell_area,
                     scene.noise_floor[key],
-                    scene.effective_frames,
+                    scene.effective_frames[key],
+                    scene.noise_frames,
                     tree.rng("speckle_statistical", image, key_number),
                 ).reshape(shape)
                 for image, image_cbv in enumerate(cbv)

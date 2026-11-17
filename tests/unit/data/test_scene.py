@@ -18,6 +18,7 @@ from neurosim.data.scene import (
     power_doppler_operator,
     probe_plane,
     skull_sound_speed_r2,
+    speckle_frame_counts,
 )
 from neurosim.data.types import BEAMFORMERS, CLEAN_DAS, SKULL_CT, SKULL_DAS, SKULL_TRUE
 from neurosim.fus.beamform import make_beamformer
@@ -54,7 +55,37 @@ def test_scene_matches_the_contract_shapes_and_dtypes(small_cfg, small_run):
         assert scene.noise_floor[key].dtype == np.float32 and np.all(scene.noise_floor[key] > 0.0)
     for screen in (scene.screen_ct, scene.screen_true):
         assert screen.delays.shape == screen.amplitudes.shape == (setup.transducer.n_elements,)
-    assert scene.effective_frames == small_cfg.imaging.sequence.n_frames
+    n_frames = small_cfg.imaging.sequence.n_frames
+    assert set(scene.effective_frames) == set(BEAMFORMERS)
+    for key in BEAMFORMERS:
+        blood_frames = scene.effective_frames[key]
+        assert blood_frames.shape == (n_pix,) and blood_frames.dtype == np.float32
+        assert np.all(blood_frames >= 1.0) and np.all(blood_frames <= n_frames)
+    assert scene.noise_frames == n_frames
+
+
+def test_effective_frames_follow_the_blood_velocity_or_the_override(small_cfg, small_run):
+    scene, extras, _ = small_run
+    arguments = (scene.pixel_grid, scene.operators, scene.cbv_baseline)
+    velocity = extras.blood_velocity
+    derived, noise_frames = speckle_frame_counts(small_cfg.imaging, *arguments, velocity)
+    assert noise_frames == scene.noise_frames
+    for key in BEAMFORMERS:
+        np.testing.assert_array_equal(derived[key], scene.effective_frames[key])
+    # Blood ten times faster renews the speckle more often in every pixel that sees blood.
+    faster, _ = speckle_frame_counts(small_cfg.imaging, *arguments, 10.0 * velocity)
+    sees_blood = scene.operators[CLEAN_DAS] @ scene.cbv_baseline.ravel() > 0.0
+    assert np.all(faster[CLEAN_DAS][sees_blood] > derived[CLEAN_DAS][sees_blood])
+    # The beamformers see different mixtures of cells, so their counts differ.
+    assert not np.array_equal(derived[SKULL_DAS], derived[CLEAN_DAS])
+    # The override forces one count for blood and noise, whatever the velocity.
+    doppler = replace(small_cfg.imaging.doppler, effective_frames=7)
+    forced_cfg = replace(small_cfg.imaging, doppler=doppler)
+    forced, forced_noise = speckle_frame_counts(forced_cfg, *arguments, velocity)
+    assert forced_noise == 7.0
+    for key in BEAMFORMERS:
+        np.testing.assert_array_equal(forced[key], np.full(scene.noise_floor[key].shape, 7.0))
+        assert forced[key].dtype == np.float32
 
 
 def test_cbv_fields_live_in_the_brain(small_run):

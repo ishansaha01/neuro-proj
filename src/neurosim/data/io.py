@@ -8,12 +8,17 @@ Layout of the bundle (`common.io.save_bundle`):
   bundle attribute ``<bank>``;
 - ``scene/<screen>/delays`` and ``scene/<screen>/amplitudes`` for ``screen_ct``
   and ``screen_true``;
-- ``scene/operators/<key>`` and ``scene/noise_floor/<key>`` per beamformer key;
+- ``scene/operators/<key>``, ``scene/noise_floor/<key>`` and
+  ``scene/effective_frames/<key>`` per beamformer key;
 - ``trials/time``, ``trials/amplitude``, ``trials/label``, ``trials/cbv`` and
   ``trials/power_doppler/<key>``;
 - attributes: the provenance of the run (`common.io.provenance`), ``imaging``
   (the `ImagingConfig` as plain data), ``plane``, ``pixel_grid``, ``cell_area``,
-  ``effective_frames``, ``fidelity`` and ``meta`` (`Scene.meta`).
+  ``noise_frames``, ``fidelity`` and ``meta`` (`Scene.meta`).
+
+Bundles written before the independent-frame counts became per pixel (ROADMAP
+D-018) carry one scalar attribute ``effective_frames`` instead; `load_run`
+refuses them, because their images were drawn with far too little speckle.
 
 The fine plane media of a run are not part of the `Scene` contract. When they
 are kept, they are written with `head.io.save_plane_medium` next to the run
@@ -80,6 +85,7 @@ def save_run(
     for key in BEAMFORMERS:
         arrays[f"scene/operators/{key}"] = scene.operators[key]
         arrays[f"scene/noise_floor/{key}"] = scene.noise_floor[key]
+        arrays[f"scene/effective_frames/{key}"] = scene.effective_frames[key]
         arrays[f"trials/power_doppler/{key}"] = trials.power_doppler[key]
     arrays.update({f"trials/{name}": getattr(trials, name) for name in _TRIAL_SERIES})
     attrs.update(
@@ -95,7 +101,7 @@ def save_run(
             "origin": list(scene.pixel_grid.origin),
         },
         cell_area=scene.cell_area,
-        effective_frames=scene.effective_frames,
+        noise_frames=scene.noise_frames,
         fidelity=trials.fidelity,
         meta=scene.meta,
     )
@@ -108,8 +114,20 @@ def load_run(path: str | os.PathLike[str]) -> tuple[Scene, TrialSet]:
     Returns the `Scene` and the `TrialSet`. The provenance attributes of the
     bundle (config YAML, git commit, package version) are not part of either;
     read them with `common.io.load_bundle`.
+
+    Raises:
+        ValueError: if the bundle has no per-pixel independent-frame counts (it was
+            written before ROADMAP D-018 was fixed; module docstring).
     """
     arrays, attrs = load_bundle(path)
+    missing = [key for key in BEAMFORMERS if f"scene/effective_frames/{key}" not in arrays]
+    if missing or "noise_frames" not in attrs:
+        raise ValueError(
+            f"{path}: no per-pixel independent-frame counts (scene/effective_frames/<key> and "
+            "the attribute noise_frames). The bundle was written before the speckle model of "
+            "ROADMAP D-018 was fixed, with one gamma shape for the whole image and far too "
+            "little speckle; regenerate it with scripts/run_pipeline.py or scripts/make_dataset.py"
+        )
 
     def group(prefix: str) -> dict[str, np.ndarray]:
         """The datasets under a name prefix, keyed by the rest of their name."""
@@ -133,7 +151,8 @@ def load_run(path: str | os.PathLike[str]) -> tuple[Scene, TrialSet]:
             origin=tuple(attrs["pixel_grid"]["origin"]),
         ),
         cell_area=attrs["cell_area"],
-        effective_frames=attrs["effective_frames"],
+        effective_frames={key: arrays[f"scene/effective_frames/{key}"] for key in BEAMFORMERS},
+        noise_frames=attrs["noise_frames"],
         operators={key: arrays[f"scene/operators/{key}"] for key in BEAMFORMERS},
         noise_floor={key: arrays[f"scene/noise_floor/{key}"] for key in BEAMFORMERS},
         meta=attrs["meta"],
