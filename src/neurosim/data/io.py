@@ -88,6 +88,13 @@ def save_run(
         arrays[f"scene/effective_frames/{key}"] = scene.effective_frames[key]
         arrays[f"trials/power_doppler/{key}"] = trials.power_doppler[key]
     arrays.update({f"trials/{name}": getattr(trials, name) for name in _TRIAL_SERIES})
+    if scene.ct_hu is not None:
+        arrays["scene/ct_hu"] = scene.ct_hu
+        attrs["medium_grid"] = {
+            "shape": list(scene.medium_grid.shape),
+            "spacing": scene.medium_grid.spacing,
+            "origin": list(scene.medium_grid.origin),
+        }
     attrs.update(
         imaging=to_dict(scene.imaging),
         plane={
@@ -156,6 +163,16 @@ def load_run(path: str | os.PathLike[str]) -> tuple[Scene, TrialSet]:
         operators={key: arrays[f"scene/operators/{key}"] for key in BEAMFORMERS},
         noise_floor={key: arrays[f"scene/noise_floor/{key}"] for key in BEAMFORMERS},
         meta=attrs["meta"],
+        ct_hu=arrays.get("scene/ct_hu"),
+        medium_grid=(
+            Grid2D(
+                shape=tuple(attrs["medium_grid"]["shape"]),
+                spacing=attrs["medium_grid"]["spacing"],
+                origin=tuple(attrs["medium_grid"]["origin"]),
+            )
+            if "medium_grid" in attrs
+            else None
+        ),
         **{name: arrays[f"scene/{name}"] for name in _SCENE_MAPS},
         **banks,
         **screens,

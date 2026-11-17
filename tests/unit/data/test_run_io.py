@@ -110,3 +110,14 @@ def test_run_is_the_scene_and_trials_of_the_seed_tree(quick_cfg, quick_scene):
     for key in BEAMFORMERS:
         np.testing.assert_array_equal(scene.operators[key], reference.operators[key])
     assert trials.time.shape == (quick_cfg.trials.n_images,)
+
+
+def test_the_ct_image_of_the_plane_survives_a_round_trip(tmp_path, small_cfg, small_run):
+    """`Scene.ct_hu` and its grid are measured data a reconstruction needs (D-023)."""
+    scene, _, trials = small_run
+    assert scene.ct_hu is not None and scene.ct_hu.shape == scene.medium_grid.shape
+    path = tmp_path / "run.h5"
+    save_run(path, scene, trials, small_cfg, SMALL_SEED)
+    loaded, _ = load_run(path)
+    np.testing.assert_array_equal(loaded.ct_hu, scene.ct_hu)
+    assert loaded.medium_grid == scene.medium_grid

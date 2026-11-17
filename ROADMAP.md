@@ -168,6 +168,12 @@ The statistical tier's speckle variance is derived per pixel from the local bloo
 
 ## 3. Change log
 
+### 2026-11-17 — The scene carries the CT image of the plane
+- **What:** `Scene` gained two optional fields, `ct_hu` (the CT image of the imaging plane in Hounsfield units on the fine acoustic grid) and `medium_grid`; `build_scene` fills them, `save_run` / `load_run` store them, and `Scene.meta` now records the absorption exponent, the bone threshold and the correction-model backend settings. Synthetic scenes leave them empty.
+- **Why:** The CT is measured data. Until now a `Scene` held only the Green's bank derived from the CT with one fixed HU mapping, so a reconstruction could not build skull models with other mapping constants, which is what the README's "CT-derived skull model whose HU mapping constants are randomized" requires.
+- **Files:** `src/neurosim/data/{types,scene,io}.py`, `tests/unit/data/test_run_io.py`.
+- **Evals affected:** none in claim; E-DATA-003 (bundle determinism) is re-run with the full suite.
+
 ### 2026-11-17 — Make `bent_ray` and derived speckle the production settings (D-021, D-022)
 - **What:** `data.scene` now builds the CT-derived bank and the true-skull model with the data's own backend (`bent_ray` when the data backend is `kwave`), instead of always using straight rays. `configs/run_demo.yaml`, `configs/run_default.yaml` and `configs/sweep_demo.yaml` use `backend: bent_ray`; the demo run and demo sweep acquire 120 images at 1 s intervals instead of 60 and 40. `run_small` and `sweep_small` keep `ray` for speed. Added D-021 and D-022. Updated `docs/ARCHITECTURE.md` (backend table, statistical tier, `Scene` fields), the `GreensBank.backend` docstring, and two stale doc strings. Reworded three stale phrases in the E-FUS-022 decorator ("n_frames as the default configuration assigns", "the two speeds", "both speeds"); its bar and numbers are unchanged.
 - **Why:** The two fixes are only useful if the pipeline uses them. More images per scene because, with realistic speckle, single images carry little information (D-022).

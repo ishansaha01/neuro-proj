@@ -9,7 +9,7 @@ Change them only together with docs/ARCHITECTURE.md.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 
@@ -62,6 +62,11 @@ class Scene:
             every pixel and beamformer: `imaging.sequence.n_frames`, or the override.
         meta: provenance and diagnostics (config hash, seed, medium grid, cost, CT settings,
             R^2 of CT-derived vs true skull sound speed).
+        ct_hu: the CT image of the imaging plane in Hounsfield units on `medium_grid`,
+            float32, (nz_medium, nx_medium). This is measured data: a reconstruction may use
+            it to build skull models (`data.ct_prior.ct_plane_medium`). None for synthetic
+            scenes that have no CT.
+        medium_grid: fine acoustic grid of the imaging plane that `ct_hu` is sampled on.
     """
 
     imaging: ImagingConfig
@@ -81,6 +86,8 @@ class Scene:
     effective_frames: dict[str, np.ndarray]
     noise_frames: float
     meta: dict[str, Any] = field(default_factory=dict)
+    ct_hu: Optional[np.ndarray] = None
+    medium_grid: Optional[Grid2D] = None
 
 
 @dataclass(frozen=True)

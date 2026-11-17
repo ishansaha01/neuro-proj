@@ -43,7 +43,7 @@ from neurosim.common.config import config_hash, to_dict
 from neurosim.common.grid import Grid2D, PlaneSpec, sample_plane_map
 from neurosim.common.seeding import SeedTree
 from neurosim.data.config import RunConfig, medium_grid, trial_fidelity
-from neurosim.data.ct_prior import ct_prior_medium, prior_hu_mapping
+from neurosim.data.ct_prior import ct_plane_hu, ct_prior_medium, prior_hu_mapping
 from neurosim.data.ct_prior import estimate_cost as estimate_ct_prior_cost
 from neurosim.data.types import (
     BEAMFORMERS,
@@ -311,6 +311,7 @@ def build_scene_with_extras(cfg: RunConfig, tree: SeedTree) -> tuple[Scene, Scen
         "root_seed": tree.root_seed,
         "backend": cfg.backend.backend,
         "skull_true_model": model_true.backend,
+        "model_backend": to_dict(_model_backend(cfg)),
         "effects": to_dict(cfg.effects),
         "medium_grid": _grid_summary(grid),
         "cost": cost,
@@ -324,6 +325,8 @@ def build_scene_with_extras(cfg: RunConfig, tree: SeedTree) -> tuple[Scene, Scen
             "mu_water": ct.meta["mu_water"],
             "mu_air": ct.meta["mu_air"],
             "hu_mapping": dataclasses.asdict(mapping),
+            "alpha_power": cfg.ct.hu_mapping.alpha_power,
+            "bone_threshold_hu": cfg.ct.hu_mapping.bone_threshold_hu,
         },
         "ct_sound_speed_r2": skull_sound_speed_r2(truth, medium_ct),
     }
@@ -345,6 +348,8 @@ def build_scene_with_extras(cfg: RunConfig, tree: SeedTree) -> tuple[Scene, Scen
         effective_frames=effective_frames,
         noise_frames=noise_frames,
         meta=meta,
+        ct_hu=ct_plane_hu(ct, grid, plane),
+        medium_grid=grid,
     )
     extras = SceneExtras(
         medium=medium,
