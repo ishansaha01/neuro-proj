@@ -34,11 +34,12 @@ MAX_DELAY_DIFFERENCE = 0.15e-6  # [s]
 @eval_case(
     id=EVAL_ID,
     claim=(
-        "built with the kwave backend, the scene's full-wave skull bank and the ray bank that "
-        "serves as the true-skull beamforming model give the same per-element skull delays"
+        "built with the kwave backend, the scene's full-wave skull bank and the ray-model bank "
+        "that serves as the true-skull beamforming model (straight rays when this eval was "
+        "written; bent rays since ROADMAP D-021) give the same per-element skull delays"
     ),
     reference=(
-        "Two independent solvers on one medium: k-Wave (full wave) against straight rays, "
+        "Two independent solvers on one medium: k-Wave (full wave) against the ray model, "
         "both reduced by the phase slope over frequency (extends E-FUS-005 from a slab phantom "
         "to a generated head inside the pipeline)"
     ),
@@ -84,7 +85,7 @@ def test_e_data_011_full_wave_pipeline() -> None:
     )
     scene, extras = build_scene_with_extras(cfg, SeedTree(REGISTRY[EVAL_ID].seeds[0]))
     assert scene.bank_skull.backend == scene.bank_clean.backend == "kwave"
-    assert scene.bank_ct.backend == extras.model_true.backend == "ray"
+    assert scene.bank_ct.backend == extras.model_true.backend == "bent_ray"
     assert scene.bank_skull.static_fmc is not None
 
     full_wave = scene.screen_true.delays

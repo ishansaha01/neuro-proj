@@ -168,6 +168,12 @@ The statistical tier's speckle variance is derived per pixel from the local bloo
 
 ## 3. Change log
 
+### 2026-11-17 — E-DATA-011 follows the correction-model backend
+- **What:** E-DATA-011 asserted that the true-skull beamforming model under the `kwave` backend is a straight-ray bank; since D-021 it is a `bent_ray` bank, so the eval stopped at that guard. Changed the guard and the wording of the claim and reference; the bar (0.15 µs) is unchanged.
+- **Why:** The eval's subject (the pipeline's correction model against the full-wave bank) changed with D-021.
+- **Result (to be confirmed by the clean re-run):** passing at 0.135 µs. Note that this is closer to the bar than the 0.083 µs measured with straight rays on the same toy scene (8 elements, 0.5 MHz): a first-arrival delay and the phase-slope delay of a full-wave field are not the same quantity when later arrivals carry energy.
+- **Files:** `evals/data/test_e_data_011_full_wave_pipeline.py`.
+
 ### 2026-11-17 — The scene carries the CT image of the plane
 - **What:** `Scene` gained two optional fields, `ct_hu` (the CT image of the imaging plane in Hounsfield units on the fine acoustic grid) and `medium_grid`; `build_scene` fills them, `save_run` / `load_run` store them, and `Scene.meta` now records the absorption exponent, the bone threshold and the correction-model backend settings. Synthetic scenes leave them empty.
 - **Why:** The CT is measured data. Until now a `Scene` held only the Green's bank derived from the CT with one fixed HU mapping, so a reconstruction could not build skull models with other mapping constants, which is what the README's "CT-derived skull model whose HU mapping constants are randomized" requires.
