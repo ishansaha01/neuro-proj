@@ -28,6 +28,14 @@ enters as a diagonal scaling between two of these products,
 `operator_factors` exports `P`, `tx_w`, `D`, `rx_w` and `G`; `psf_operator`
 contracts the same arrays with `u = 1`. `recon.forward` contracts them in torch
 for any `u` (eval E-RECON-005).
+
+Weights of a varying model. `tx_w` and `rx_w` are functions of the model bank
+(`beamform.make_beamformer`). `weight_factors` exports what they are made of
+besides the bank's own values: the reference Green's function at the pixels,
+the nodes and weights of the bank's bilinear interpolation, the firing phasors,
+the receive apodisation and the pulse spectrum. `recon.rebeamform` builds the
+weights from these in torch for any model bank on that grid, so that they can be
+differentiated with respect to the model (eval E-RECON-012).
 """
 
 from __future__ import annotations
@@ -38,10 +46,11 @@ from dataclasses import dataclass
 import numpy as np
 
 from neurosim.common.grid import Grid2D
-from neurosim.fus.beamform import Beamformer, make_beamformer
+from neurosim.fus.beamform import Beamformer, make_beamformer, receive_apodization
 from neurosim.fus.config import BeamformingConfig
-from neurosim.fus.greens import check_same_sampling, medium_greens
+from neurosim.fus.greens import bilinear_weights, check_same_sampling, medium_greens
 from neurosim.fus.pulse import pulse_spectrum
+from neurosim.fus.reference import reference_greens
 from neurosim.fus.synthesis import transmit_phasors
 from neurosim.fus.types import GreensBank, PlaneWaveSequence
 
@@ -83,6 +92,79 @@ class OperatorFactors:
     tx_phasors: np.ndarray
     rx_weights: np.ndarray
     greens: np.ndarray
+
+
+@dataclass(frozen=True)
+class WeightFactors:
+    """What the beamformer weights of a model bank are made of, at a set of pixels.
+
+    For a model bank with values `B[f, e, node]` on the nodes of its ROI grid, the
+    model's transfer function to pixel `p` is
+
+        M[f, e, p] = reference[f, e, p] * sum_c node_weights[c, p] B[f, e, nodes[c, p]]
+
+    and `beamform.make_beamformer` forms from it (module docstring of `fus.beamform`)
+
+        receive = M,   transmit[f, a, p] = sum_e tx_phasors[f, a, e] M[f, e, p]
+        tx_weights = conj(transmit) / |transmit|
+        rx_weights = apodization * conj(receive) / |receive| / unit_response
+        unit_response[p] = sum_f pulse[f] (sum_a |transmit|) (sum_e apodization |receive|)
+        noise_gain[p] = sum_f (sum_a |tx phase|^2) (sum_e |rx phase|^2) / unit_response^2
+
+    Attributes:
+        freqs: frequencies [Hz], float64, shape (nf,).
+        pulse: two-way pulse spectrum, float64, shape (nf,).
+        tx_phasors: firing phasors, complex64, shape (nf, n_angles, n_elements).
+        reference: reference Green's function from every element to every selected
+            pixel, complex64, shape (nf, n_elements, n_selected).
+        apodization: receive apodisation, float64, shape (n_elements, n_selected).
+        nodes: flat indices of the four ROI nodes around each pixel, int64, (4, n_selected).
+        node_weights: their bilinear weights, float32, shape (4, n_selected).
+    """
+
+    freqs: np.ndarray
+    pulse: np.ndarray
+    tx_phasors: np.ndarray
+    reference: np.ndarray
+    apodization: np.ndarray
+    nodes: np.ndarray
+    node_weights: np.ndarray
+
+
+def weight_factors(
+    model_bank: GreensBank,
+    pixel_grid: Grid2D,
+    sequence: PlaneWaveSequence,
+    beamforming: BeamformingConfig = BeamformingConfig(),
+    pixel_index: np.ndarray | None = None,
+) -> WeightFactors:
+    """The arrays `make_beamformer` combines with a model bank's values (`WeightFactors`).
+
+    Args:
+        model_bank: any bank on the array, frequency grid and ROI grid of the model
+            family; its values `B` are not used.
+        pixel_grid: image grid.
+        sequence: gives the steering angles.
+        beamforming: receive aperture options.
+        pixel_index: flat indices of the pixels to export; None = all pixels.
+    """
+    points = pixel_grid.points().reshape(-1, 2)
+    apodization = receive_apodization(model_bank.transducer, pixel_grid, beamforming)
+    if pixel_index is not None:
+        points, apodization = points[pixel_index], apodization[:, pixel_index]
+    nodes, node_weights = bilinear_weights(model_bank.roi, points)
+    reference = reference_greens(
+        model_bank.transducer, points, model_bank.freqs, model_bank.c_ref
+    )
+    return WeightFactors(
+        freqs=np.asarray(model_bank.freqs, dtype=np.float64),
+        pulse=pulse_spectrum(model_bank.transducer, model_bank.freqs),
+        tx_phasors=transmit_phasors(model_bank, sequence).astype(np.complex64),
+        reference=reference.astype(np.complex64),
+        apodization=apodization,
+        nodes=nodes,
+        node_weights=node_weights,
+    )
 
 
 def _medium_factor_chunks(

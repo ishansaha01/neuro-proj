@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Literal, Optional
 
 from neurosim.common.config import field
+from neurosim.ct.config import HuMappingConfig
 from neurosim.recon.synthetic import SyntheticConfig
 
 
@@ -168,6 +169,152 @@ class CalibrationConfig:
 
 
 @dataclass(frozen=True)
+class SkullModelConfig:
+    """The family of CT-derived skull models and its prior (`recon.skull_model`)."""
+
+    hu_knot_spacing: float = field(
+        50.0,
+        gt=0.0,
+        doc="Largest spacing of the knots of the CT-number axis of the path-length "
+        "histograms [HU]. The slowness of the HU map is interpolated linearly between "
+        "knots; at 50 HU the error is below 1e-4 of the slowness (under 1 ns through a "
+        "skull). Numerical choice.",
+    )
+    lateral_knot_spacing: float = field(
+        2.0e-3,
+        gt=0.0,
+        doc="Largest spacing of the lateral knots of the bone path-length histogram [m]; "
+        "the lateral modes are linear between knots. Below the 3 mm correlation length "
+        "of the head model's hidden sound-speed component (head.config); numerical choice.",
+    )
+    n_lateral_modes: int = field(
+        16,
+        ge=1,
+        doc="Cosine modes of extra slowness across the plane inside the CT bone, smoothest "
+        "first (half-periods from the plane width down to width / n). Modelling choice: "
+        "how much of the skull's CT-invisible sound speed they can represent is measured "
+        "by the experiment (recon.medium_experiment).",
+    )
+    lateral_sound_speed_sigma: float = field(
+        100.0,
+        gt=0.0,
+        doc="Prior standard deviation of the sound-speed change a single lateral mode makes "
+        "at `lateral_reference_speed` [m/s]. Webb et al. 2018 (IEEE TUFFC 65:1111) report a "
+        "mean 95 % confidence interval of +-198 m/s on skull velocity predicted from HU, "
+        "about 100 m/s standard deviation; how that splits over lateral modes is assumed, "
+        "to verify.",
+    )
+    lateral_reference_speed: float = field(
+        2500.0,
+        gt=0.0,
+        doc="Sound speed at which `lateral_sound_speed_sigma` is converted to slowness, "
+        "sigma_s = sigma_c / c^2 [m/s]: a mid-range skull value between the end points of "
+        "the HU map (1500 and 2900 m/s); assumed, to verify.",
+    )
+    mapping_prior: HuMappingConfig = field(
+        default_factory=HuMappingConfig,
+        doc="Ranges of the HU-map constants (uniform prior): `c_bone_range`, "
+        "`c_water_range` and `hu_bone_relative_range` of the CT package.",
+    )
+
+
+@dataclass(frozen=True)
+class FocusConfig:
+    """Calibration of the skull model by re-beamforming (`recon.focus`)."""
+
+    n_pixels: int = field(
+        96,
+        ge=1,
+        doc="Calibration pixels: a random subset of the brain pixels, fixed per scene (all "
+        "of them if the brain has fewer). Run-time choice: one criterion gradient costs "
+        "about 10 ms per pixel at 128 elements, 136 frequencies and 1024 blood cells.",
+    )
+    pixels_per_pass: int = field(
+        32,
+        ge=1,
+        doc="Calibration pixels whose criterion terms are differentiated together; the "
+        "gradient is accumulated over passes. Memory choice (a pass keeps about 8 MB per "
+        "pixel at 136 frequencies and 1024 blood cells); the result does not depend on it "
+        "beyond rounding.",
+    )
+    source_refinement: int = field(
+        1,
+        ge=1,
+        doc="Blood source points per pixel side in the emulated criterion "
+        "(recon.scanner); 1 is an approximation made for run time, the scored images use "
+        "MediumReconConfig.source_refinement.",
+    )
+    criterion_power: float = field(
+        1.0,
+        gt=0.0,
+        doc="Exponent g of the criterion (1 / g) log mean_p r_p^g of the pixel signal-to-"
+        "floor ratios r_p: 1 is the mean ratio (the speckle-brightness criterion of Nock, "
+        "Trahey & Smith 1989 on power Doppler), 2 the image sharpness of Muller & Buffington "
+        "1974. Choice explained in recon.focus.",
+    )
+    mode_stages: tuple[int, ...] = field(
+        (0, 2, 4, 8, 16),
+        ge=0,
+        doc="Number of lateral modes optimised in each stage, coarse to fine; the HU-map "
+        "constants are optimised in every stage. The last entry must not exceed "
+        "SkullModelConfig.n_lateral_modes. Tuning choice; assumed, to verify.",
+    )
+    iterations_per_stage: int = field(
+        8, ge=1, doc="L-BFGS iterations of one stage; run-time and tuning choice."
+    )
+    prior_weight: float = field(
+        0.01,
+        ge=0.0,
+        doc="Weight of the Gaussian log prior of the lateral coefficients against the "
+        "criterion (a log of a mean ratio, not a log likelihood, so the two have no common "
+        "scale). 0.01: one prior standard deviation on one mode costs 0.005, far less than "
+        "the criterion gains of tenths that focusing brings, so the prior only holds the "
+        "directions the criterion does not see. Tuning choice; assumed, to verify.",
+    )
+
+    def __post_init__(self) -> None:
+        if list(self.mode_stages) != sorted(self.mode_stages) or not self.mode_stages:
+            raise ValueError("mode_stages must be a non-empty ascending tuple")
+
+
+@dataclass(frozen=True)
+class MediumReconConfig:
+    """The medium-space skull model, its calibration and the condition-mean reconstruction."""
+
+    skull_model: SkullModelConfig = field(
+        default_factory=SkullModelConfig, doc="The family of CT-derived skull models."
+    )
+    focus: FocusConfig = field(
+        default_factory=FocusConfig, doc="Calibration of the family by re-beamforming."
+    )
+    dps: DpsConfig = field(
+        default_factory=lambda: DpsConfig(n_steps=25, n_samples=4),
+        doc="Posterior sampling of the two condition means of a scene (rest and task).",
+    )
+    fold_samples: int = field(
+        1,
+        ge=1,
+        doc="Posterior samples per condition mean of a training fold, for the matched-"
+        "filter template of the DPS rows; run-time choice.",
+    )
+    reference_cbv: Optional[float] = field(
+        None,
+        gt=0.0,
+        doc="Blood volume fraction assumed for the brain on average when the common "
+        "amplitude of a skull model is matched (recon.medium_recon). None: the scene's "
+        "`imaging.noise.cbv_reference`, the nominal blood volume the noise level is "
+        "specified against (0.03). A prior assumption on the CBV scale.",
+    )
+    dice_fraction: float = field(
+        0.5,
+        gt=0.0,
+        lt=1.0,
+        doc="A pixel of an estimated activation map counts as activated above this "
+        "fraction of the map's maximum inside the brain (half maximum).",
+    )
+
+
+@dataclass(frozen=True)
 class MetricsConfig:
     """Settings of the evaluation metrics (`recon.metrics`)."""
 
@@ -217,6 +364,11 @@ class ReconConfig:
         default_factory=DeconvolutionConfig, doc="Classical baseline."
     )
     metrics: MetricsConfig = field(default_factory=MetricsConfig, doc="Evaluation metrics.")
+    medium: MediumReconConfig = field(
+        default_factory=MediumReconConfig,
+        doc="The second design: medium-space skull model calibrated by re-beamforming, and "
+        "reconstruction of condition means (recon.medium_experiment).",
+    )
     num_threads: int = field(
         1,
         ge=1,

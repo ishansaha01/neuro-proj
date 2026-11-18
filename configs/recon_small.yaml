@@ -2,9 +2,10 @@
 # (neurosim.recon.synthetic): the skull is exactly a per-element delay and amplitude, so
 # the phase-screen model of the reconstruction has no model mismatch. Used to exercise the
 # experiment end to end and by the recon evals; it is not a simulation of a skull.
-#   python scripts/run_experiment.py --make-synthetic --dataset outputs/recon_synthetic \
-#       --prior outputs/prior/prior.pt --config configs/recon_small.yaml --seed 0 \
-#       --out outputs/experiment_synthetic
+#   python scripts/run_experiment.py --design screen --make-synthetic \
+#       --dataset outputs/recon_synthetic --prior outputs/prior/prior.pt \
+#       --config configs/recon_small.yaml --seed 0 --out outputs/experiment_synthetic
+# (the first design: synthetic scenes have no CT image, which the default design needs)
 #   python scripts/plot_experiment.py --results outputs/experiment_synthetic --out outputs/experiment_synthetic/figure.png
 # About 5 minutes for 4 scenes on the 2-core development machine (the script prints an
 # estimate). Keys left out keep the defaults of neurosim.recon.config.ReconConfig.

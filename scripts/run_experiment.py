@@ -2,16 +2,24 @@
 
 Usage: ``python scripts/run_experiment.py --dataset outputs/demo_sweep --prior
 outputs/prior/prior.pt --config configs/recon_default.yaml --seed 0 --out
-outputs/experiment``. Prints a time estimate first; ``--estimate-only`` stops there.
+outputs/experiment_v2``. Prints a time estimate first; ``--estimate-only`` stops there.
 
-Writes ``results.json`` (configuration, per-scene metrics, summary), ``results.md``
-(the summary table) and ``examples.npz`` (truth and every method's image for one rest
-and one task trial of the first scene) into ``--out``; ``scripts/plot_experiment.py``
-turns them into a figure.
+``--design medium`` (the default) runs the second design, `recon.medium_experiment`: a
+CT-derived skull model in medium space calibrated by re-beamforming, and reconstruction
+of the rest and task means. ``--design screen`` runs the first design,
+`recon.experiment`: a per-element phase screen calibrated blindly, and per-trial
+reconstruction (it needs a dataset whose scenes carry no requirement on the CT).
+
+Writes ``results.json`` (configuration, per-scene metrics, summary, failures),
+``results.md`` (the summary table; for the medium design also the per-scene skull-model
+table) and ``examples.npz`` (truth and every method's images of the first scene) into
+``--out``; ``scripts/plot_experiment.py`` turns them into a figure. A method that fails
+on a scene (non-finite images) is listed with its reason and left out of that method's
+statistics; the run continues.
 
 ``--make-synthetic`` first writes the synthetic phase-screen stand-in dataset of the
 config's ``synthetic`` section into ``--dataset`` (if it has no index yet); its results
-are labelled synthetic.
+are labelled synthetic. Synthetic scenes have no CT, so they need ``--design screen``.
 """
 
 from __future__ import annotations
@@ -30,9 +38,15 @@ from neurosim.common.io import provenance
 from neurosim.data.sweep import INDEX_NAME, load_dataset
 from neurosim.recon.checkpoint import load_prior
 from neurosim.recon.config import ReconConfig
-from neurosim.recon.experiment import estimate_seconds, markdown_table, run_experiment, summarise
+from neurosim.recon import experiment as screen_design
+from neurosim.recon import medium_experiment as medium_design
 from neurosim.recon.seeding import configure_torch
 from neurosim.recon.synthetic import write_synthetic_dataset
+
+
+# Peak resident memory of one run on the demo dataset, measured on the development
+# machine (2026-11-17) [GiB]; printed with the time estimate.
+_PEAK_GIB = {"medium": 2.1, "screen": 1.7}
 
 
 def main(argv: list[str]) -> int:
@@ -44,6 +58,13 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--seed", type=int, required=True, help="root seed of the experiment")
     parser.add_argument("--out", required=True, help="output directory")
     parser.add_argument("--scenes", type=int, help="use only the first SCENES scenes")
+    parser.add_argument(
+        "--design",
+        choices=("medium", "screen"),
+        default="medium",
+        help="medium: CT skull model calibrated by re-beamforming (default); "
+        "screen: the first design, a blind phase screen",
+    )
     parser.add_argument("--estimate-only", action="store_true", help="print the estimate and stop")
     parser.add_argument(
         "--make-synthetic",
@@ -67,17 +88,23 @@ def main(argv: list[str]) -> int:
         write_synthetic_dataset(cfg.synthetic, args.seed, dataset_dir)
     index = json.loads((dataset_dir / INDEX_NAME).read_text(encoding="utf-8"))
     synthetic = bool(index.get("synthetic", False))
+    if synthetic and args.design == "medium":
+        parser.error(
+            "synthetic phase-screen scenes carry no CT image, which the medium design needs; "
+            "use --design screen"
+        )
     n_scenes = min(index["n_scenes"], args.scenes or index["n_scenes"])
 
+    design = medium_design if args.design == "medium" else screen_design
     configure_torch(cfg.num_threads)
     first_scene, first_trials = next(iter(load_dataset(dataset_dir)))
-    estimate = estimate_seconds(first_scene, len(first_trials.label), n_scenes, cfg)
+    estimate = design.estimate_seconds(first_scene, len(first_trials.label), n_scenes, cfg)
     del first_scene, first_trials
     print(
         f"{n_scenes} scenes{' (SYNTHETIC phase-screen skulls)' if synthetic else ''}: "
         f"estimated {estimate['total'] / 60.0:.1f} min single-threaded ("
         + ", ".join(f"{name} {value:.0f} s" for name, value in estimate.items() if name != "total")
-        + "), under 1.5 GB"
+        + f"), about {_PEAK_GIB[args.design]} GiB peak memory"
     )
     if args.estimate_only:
         return 0
@@ -87,17 +114,23 @@ def main(argv: list[str]) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     start = time.perf_counter()
     scenes, examples = [], None
-    for record, scene_examples in run_experiment(
+    for record, scene_examples in design.run_experiment(
         islice(load_dataset(dataset_dir), n_scenes), prior, cfg, args.seed
     ):
         scenes.append(record)
         examples = examples or scene_examples
-        print(f"scene {record['index']} done, {time.perf_counter() - start:.0f} s elapsed")
+        print(
+            f"scene {record['index']} done, {time.perf_counter() - start:.0f} s elapsed",
+            flush=True,
+        )
     wall_seconds = time.perf_counter() - start
 
-    summary = summarise(scenes)
+    summary = design.summarise(scenes)
+    failed = design.failures(scenes)
     results = {
         **provenance(cfg, args.seed),
+        "design": args.design,
+        "failures": failed,
         "dataset": str(dataset_dir),
         "synthetic_dataset": synthetic,
         "prior": str(args.prior),
@@ -112,14 +145,19 @@ def main(argv: list[str]) -> int:
     (out_dir / "results.json").write_text(
         json.dumps(results, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    title = "# Reconstruction experiment"
+    title = f"# Reconstruction experiment ({args.design} design)"
     if synthetic:
         title += " (SYNTHETIC phase-screen dataset)"
     table = (
         f"{title}\n\nDataset `{dataset_dir}`, {len(scenes)} scenes, seed {args.seed}; mean ± "
-        f"standard deviation over scenes. Run time {wall_seconds / 60.0:.1f} min.\n\n"
-        + markdown_table(summary)
+        f"standard deviation over the scenes a method was scored on. Run time "
+        f"{wall_seconds / 60.0:.1f} min.\n\n" + design.markdown_table(summary)
     )
+    if args.design == "medium":
+        table += "\n" + design.scene_table(scenes)
+    if failed:
+        table += "\nFailed (not scored, left out of the statistics):\n\n"
+        table += "".join(f"- {line}\n" for line in failed)
     (out_dir / "results.md").write_text(table, encoding="utf-8")
     np.savez(out_dir / "examples.npz", **examples)
     print(table)

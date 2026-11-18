@@ -89,3 +89,84 @@ def tiny_prior():
         history=[],
         steps_completed=0,
     )
+
+
+def _tiny_ct_config() -> RunConfig:
+    """A tiny real run with a CT and the bent-ray backend: 16 elements, 8 x 8 pixels, 12 trials."""
+    return from_dict(
+        RunConfig,
+        {
+            "head": {
+                "grid": {
+                    "spacing": 2.0e-3,
+                    "region": "box",
+                    "box_size": [0.064, 0.064, 0.064],
+                    "box_center_depth": 0.02,
+                }
+            },
+            "imaging": {
+                "transducer": {"n_elements": 16},
+                "sequence": {"angles_deg": [-8.0, 0.0, 8.0], "frame_rate": 500.0, "n_frames": 40},
+                "frequencies": {"n_frequencies": 28, "truncation_db": 12.0},
+                "roi": {"x_range": [-0.004, 0.004], "z_range": [0.016, 0.024], "spacing": 1.0e-3},
+                "pixels": {"shape": [8, 8], "spacing": 1.0e-3},
+                "doppler": {"cutoff_rule": "fixed", "n_discard": 2},
+                "noise": {"electronic_snr_db": 60.0},
+                "fidelity": "statistical",
+            },
+            "backend": {"backend": "bent_ray"},
+            "ct": {
+                "geometry": {"n_views": 240, "n_detectors": 192, "detector_pitch": 2.1e-3},
+                "calibration_phantom_diameter": 0.16,
+                "max_chunk_samples": 2000000,
+            },
+            "ct_prior": {"slab_half_slices": 0},
+            "medium_spacing": 0.4e-3,
+            "source_refinement": 1,
+            "trials": {"n_images": 12, "image_interval": 10.0},
+        },
+    )
+
+
+@pytest.fixture(scope="session")
+def tiny_ct_run():
+    """`(scene, trials)` of a tiny real run that carries its CT image (about 1 s)."""
+    from neurosim.data.scene import build_scene
+    from neurosim.data.trials import simulate_trials
+
+    cfg = _tiny_ct_config()
+    tree = SeedTree(DATA_SEED)
+    scene = build_scene(cfg, tree)
+    return scene, simulate_trials(scene, cfg, tree)
+
+
+@pytest.fixture(scope="session")
+def tiny_ct_family(tiny_ct_run):
+    """The skull-model family of `tiny_ct_run` with three lateral modes."""
+    from neurosim.recon.config import SkullModelConfig
+    from neurosim.recon.skull_model import build_family
+
+    return build_family(tiny_ct_run[0], SkullModelConfig(n_lateral_modes=3))
+
+
+@pytest.fixture(scope="session")
+def tiny_ct_prior(tiny_ct_run):
+    """An untrained prior on the 8 x 8 pixel grid of `tiny_ct_run`."""
+    unet_cfg = UNetConfig(
+        base_channels=8,
+        channel_multipliers=(1, 2),
+        blocks_per_level=1,
+        norm_groups=4,
+        attention=False,
+    )
+    generator = torch_generator(SeedTree(DATA_SEED), TRAINING_STREAM, TrainingDraw.WEIGHT_INIT)
+    return Prior(
+        model=build_unet(unet_cfg, generator).eval().requires_grad_(False),
+        diffusion=GaussianDiffusion(DiffusionConfig()),
+        transform=CbvTransform(),
+        pixel_grid=tiny_ct_run[0].pixel_grid,
+        config=PriorConfig(),
+        provenance={},
+        history=[],
+        steps_completed=0,
+    )

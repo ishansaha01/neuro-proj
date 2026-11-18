@@ -10,6 +10,8 @@ from __future__ import annotations
 import numpy as np
 from scipy.stats import t as student_t
 
+from neurosim.fus.pulse import pulse_spectrum
+from neurosim.fus.types import GreensBank
 from neurosim.recon.gauge import remove_gauge
 
 # Relative ridge on the within-class covariance of the decoder, as a fraction of its
@@ -216,3 +218,133 @@ def delay_error(
     """
     residual = remove_gauge(np.asarray(estimate) - np.asarray(truth), element_x, gauge)
     return float(np.sqrt(np.mean(residual**2)))
+
+
+def map_correlation(estimate: np.ndarray, truth: np.ndarray, mask: np.ndarray) -> float:
+    """Pearson correlation of two maps over the pixels of a mask.
+
+    estimate, truth: shape (nz, nx); mask: bool, shape (nz, nx). Invariant to a
+    positive scaling and an offset of either map; 0 if either map is constant.
+    """
+    first, second = np.asarray(estimate)[mask], np.asarray(truth)[mask]
+    if first.std() == 0.0 or second.std() == 0.0:
+        return 0.0
+    return float(np.corrcoef(first, second)[0, 1])
+
+
+def half_maximum_dice(
+    estimate: np.ndarray, truth_region: np.ndarray, mask: np.ndarray, fraction: float
+) -> float:
+    """Dice overlap of the region where a map exceeds a fraction of its maximum with a true region.
+
+    Detected: pixels of `mask` where `estimate > fraction * max(estimate over mask)`;
+    nothing is detected if that maximum is not positive.
+
+    estimate: shape (nz, nx); truth_region, mask: bool, shape (nz, nx); fraction in (0, 1).
+    """
+    mask = np.asarray(mask, dtype=bool)
+    peak = float(np.max(np.asarray(estimate)[mask]))
+    if peak <= 0.0:
+        return 0.0
+    detected = (np.asarray(estimate) > fraction * peak) & mask
+    return dice_overlap(detected, np.asarray(truth_region, dtype=bool) & mask)
+
+
+def map_cnr(estimate: np.ndarray, active: np.ndarray, reference: np.ndarray) -> float:
+    """Spatial contrast-to-noise ratio of a response map.
+
+    `(mean over the active region - mean over the reference region) / standard
+    deviation over the reference region` (ddof 1): how far the true activation
+    stands out of the map's own fluctuation where nothing is activated.
+
+    estimate: shape (nz, nx); active, reference: bool regions, shape (nz, nx).
+    """
+    active, reference = np.asarray(active, dtype=bool), np.asarray(reference, dtype=bool)
+    if not active.any() or reference.sum() < 2:
+        raise ValueError("the activated region is empty or the reference region too small")
+    values = np.asarray(estimate, dtype=np.float64)
+    return float(
+        (values[active].mean() - values[reference].mean()) / values[reference].std(ddof=1)
+    )
+
+
+def bank_delays(bank: GreensBank) -> tuple[np.ndarray, np.ndarray]:
+    """Group delay and band-averaged amplitude of every element-node pair of a bank.
+
+    For `B = a exp(+i 2 pi f eps)` the product of neighbouring frequency samples
+    has the phase `2 pi df eps` whatever the carrier phase; the delay is the phase
+    of the sum of these products over frequency divided by `2 pi df` (the estimate
+    of `fus.screen.fit_phase_screen`, kept per pair instead of averaged over the
+    points). The amplitude is the mean of `|B|` weighted by the two-way pulse spectrum.
+
+    Returns `(excess_delay [s], amplitude)`, float64, shape (n_elements, n_nodes) each;
+    the delay is relative to the reference medium and unambiguous within `+-1 / (2 df)`.
+    """
+    values = bank.B.reshape(*bank.B.shape[:2], -1)
+    weights = pulse_spectrum(bank.transducer, bank.freqs)
+    weights = weights / weights.sum()
+    lag_products = np.zeros(values.shape[1:], dtype=np.complex128)
+    amplitude = np.zeros(values.shape[1:])
+    for f in range(values.shape[0]):
+        amplitude += weights[f] * np.abs(values[f])
+        if f + 1 < values.shape[0]:
+            lag_products += values[f + 1].astype(np.complex128) * np.conj(values[f])
+    frequency_step = (bank.freqs[-1] - bank.freqs[0]) / (bank.freqs.shape[0] - 1)
+    return np.angle(lag_products) / (2.0 * np.pi * frequency_step), amplitude
+
+
+def weighted_delay_rms(difference: np.ndarray, weight: np.ndarray, gauge: str) -> float:
+    """Weighted rms of a delay difference over element-node pairs after removing a gauge [s].
+
+    difference, weight: shape (n_elements, n_nodes). gauge: "common" removes the
+    weighted mean over all pairs (a delay common to everything, which shifts the
+    image in range and changes no focus); "node" removes the weighted mean over
+    the elements of every node (a delay common to all elements at one field point,
+    which moves that point's echo in range without defocusing it): what is left is
+    the focusing error proper.
+    """
+    if gauge == "common":
+        residual = difference - (weight * difference).sum() / weight.sum()
+    elif gauge == "node":
+        total = weight.sum(axis=0)
+        mean = np.divide(
+            (weight * difference).sum(axis=0), total, out=np.zeros_like(total), where=total > 0
+        )
+        residual = difference - mean
+    else:
+        raise ValueError(f"unknown gauge {gauge!r}")
+    return float(np.sqrt((weight * residual**2).sum() / weight.sum()))
+
+
+def travel_time_error(model_bank: GreensBank, true_bank: GreensBank, gauge: str) -> float:
+    """Amplitude-weighted rms one-way travel-time error of a model bank [s].
+
+    The difference of the two banks' group delays (`bank_delays`) over the
+    element-node pairs to which both banks give amplitude, weighted by the true
+    amplitude (pairs the true medium barely reaches carry no signal and no
+    weight), after removing the gauge (`weighted_delay_rms`).
+    """
+    model_delay, model_amplitude = bank_delays(model_bank)
+    true_delay, true_amplitude = bank_delays(true_bank)
+    weight = true_amplitude * (model_amplitude > 0.0)
+    return weighted_delay_rms(model_delay - true_delay, weight, gauge)
+
+
+def non_finite_reason(arrays: dict[str, np.ndarray]) -> str | None:
+    """Why a method's output cannot be scored: a description of its non-finite values, or None.
+
+    arrays: the named arrays a method produced. Returns for example
+    ``"images: 3072 of 122880 values not finite (3072 NaN, 0 infinite)"``, or None
+    when every value of every array is finite.
+    """
+    reasons = []
+    for name, values in arrays.items():
+        values = np.asarray(values)
+        n_nan = int(np.isnan(values).sum())
+        n_infinite = int(np.isinf(values).sum())
+        if n_nan + n_infinite:
+            reasons.append(
+                f"{name}: {n_nan + n_infinite} of {values.size} values not finite "
+                f"({n_nan} NaN, {n_infinite} infinite)"
+            )
+    return "; ".join(reasons) or None

@@ -1,10 +1,14 @@
 # Reconstruction experiment on a dataset of neurosim.data.sweep (configs/sweep_demo.yaml:
-# 8 scenes, 128 elements, 136 frequencies, 32 x 32 pixels on the prior's grid, 40 trials).
+# 8 scenes, 128 elements, 136 frequencies, 32 x 32 pixels on the prior's grid, 120 trials).
 #   python scripts/run_experiment.py --dataset outputs/demo_sweep --prior outputs/prior/prior.pt \
-#       --config configs/recon_default.yaml --seed 0 --out outputs/experiment
-#   python scripts/plot_experiment.py --results outputs/experiment --out outputs/experiment/figure.png
-# Sized for about 20 minutes on the 2-core development machine with one thread (the script
-# prints an estimate first; measured times are in outputs/experiment/results.json).
+#       --config configs/recon_default.yaml --seed 0 --out outputs/experiment_v2
+#   python scripts/plot_experiment.py --results outputs/experiment_v2 --out outputs/experiment_v2/figure.png
+# The default design (`--design medium`, section `medium` below) calibrates a CT-derived
+# skull model by re-beamforming and reconstructs the rest and task means; measured on the
+# 2-core development machine with one thread: 45 minutes for the 8 demo scenes (5.6 minutes
+# per scene) and 2.1 GiB peak memory (the script prints an estimate first; measured times
+# are in results.json). `--design screen` runs the first design (sections `dps` and
+# `calibration`).
 # Keys left out keep the defaults documented in neurosim.recon.config.
 source_refinement: 2        # must equal the dataset's RunConfig.source_refinement
 num_threads: 1
@@ -39,3 +43,21 @@ metrics:
   activation_threshold: 0.5
   reference_threshold: 0.01
   coverage_levels: [0.5, 0.8, 0.9]
+medium:
+  skull_model:
+    hu_knot_spacing: 50.0         # HU; knots of the path-length histogram over CT number
+    lateral_knot_spacing: 2.0e-3  # m; knots of the lateral bone path-length histogram
+    n_lateral_modes: 16           # cosine modes of CT-invisible slowness across the skull
+    lateral_sound_speed_sigma: 100.0   # m/s per mode (prior)
+  focus:
+    n_pixels: 96                  # calibration pixels (random brain pixels, fixed per scene)
+    source_refinement: 1          # emulated criterion: one blood source point per pixel
+    criterion_power: 1.0          # mean signal-to-floor ratio
+    mode_stages: [0, 2, 4, 8, 16] # lateral modes per stage, coarse to fine
+    iterations_per_stage: 8
+    prior_weight: 0.01
+  dps:                            # posterior sampling of the rest mean and the task mean
+    n_steps: 25
+    n_samples: 4
+  fold_samples: 1                 # samples per training fold (matched-filter template)
+  dice_fraction: 0.5              # activation detected above half the map's maximum

@@ -87,7 +87,7 @@ from neurosim.common.config import to_dict
 from neurosim.common.constants import C_REF
 from neurosim.common.grid import Grid2D
 from neurosim.common.units import db_cm_mhz_to_np_m
-from neurosim.fus.backends.bent_ray_paths import integrate_paths, medium_maps
+from neurosim.fus.backends.bent_ray_paths import PathBins, integrate_paths, medium_maps
 from neurosim.fus.backends.config import BentRayConfig
 from neurosim.fus.backends.eikonal import solve_eikonal
 from neurosim.fus.backends.geometry import (
@@ -128,6 +128,8 @@ class BentRayIntegrals:
             `ray.py` on the same path [dimensionless]; 1 at normal incidence.
         forced: True where a traced ray had to be closed with a straight segment.
         n_sweeps: line sweeps of the eikonal solver, the largest over the batches.
+        bin_path: path-length histograms of the rays [m], float32, shape (n_elements,
+            n_points, n_bins) (`bent_ray_paths.PathBins`); None unless bins were given.
     """
 
     path_length: np.ndarray
@@ -140,6 +142,7 @@ class BentRayIntegrals:
     obliquity: np.ndarray
     forced: np.ndarray
     n_sweeps: int
+    bin_path: np.ndarray | None = None
 
 
 def grazing_window(min_cosine: np.ndarray, taper_deg: float) -> np.ndarray:
@@ -173,7 +176,11 @@ def _nearest(values: np.ndarray, grid: Grid2D, xz: np.ndarray) -> np.ndarray:
 
 
 def trace_bent_rays(
-    medium: PlaneMedium, transducer: Transducer, points_xz: np.ndarray, cfg: BentRayConfig
+    medium: PlaneMedium,
+    transducer: Transducer,
+    points_xz: np.ndarray,
+    cfg: BentRayConfig,
+    bins: PathBins | None = None,
 ) -> BentRayIntegrals:
     """Find the refracted ray from every element centre to every point.
 
@@ -183,6 +190,9 @@ def trace_bent_rays(
         transducer: the array (element centres at z = 0).
         points_xz: field points (x, z) [m], shape (n_points, 2), inside the medium grid.
         cfg: settings of the backend.
+        bins: node weights of path-length histograms to accumulate along the traced
+            rays (`bent_ray_paths.PathBins`); None = none. The other results do not
+            depend on it.
 
     Returns:
         `BentRayIntegrals` with arrays of shape (n_elements, n_points).
@@ -200,7 +210,12 @@ def trace_bent_rays(
             "every element centre and every field point must lie inside the medium grid"
         )
     maps = medium_maps(
-        grid, medium.sound_speed, medium.density, medium.attenuation, cfg.layer_normal_scale
+        grid,
+        medium.sound_speed,
+        medium.density,
+        medium.attenuation,
+        cfg.layer_normal_scale,
+        bins,
     )
     slowness = np.ascontiguousarray(maps.integrands[:, :, 0])
     step = cfg.step_fraction * grid.spacing
@@ -219,6 +234,7 @@ def trace_bent_rays(
     out = {name: np.empty(shape) for name in names}
     eikonal_time = np.empty(shape)
     forced = np.empty(shape, dtype=bool)
+    bin_path = None if bins is None else np.empty((*shape, bins.n_bins), dtype=np.float32)
     n_sweeps = 0
 
     batch = _batch_size(grid.shape[0] * grid.shape[1], n_points, n_elements, cfg)
@@ -234,6 +250,8 @@ def trace_bent_rays(
         for name in names:
             out[name][chunk] = getattr(paths, name)
         forced[chunk] = paths.forced
+        if bin_path is not None:
+            bin_path[chunk] = paths.bin_path
 
     path_length = np.hypot(
         points[None, :, 0] - sources[:, None, 0], points[None, :, 1] - sources[:, None, 1]
@@ -264,6 +282,7 @@ def trace_bent_rays(
         obliquity=obliquity,
         forced=forced,
         n_sweeps=n_sweeps,
+        bin_path=bin_path,
     )
 
 

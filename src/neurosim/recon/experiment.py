@@ -56,6 +56,7 @@ from neurosim.recon.metrics import (
     decoding_accuracy,
     delay_error,
     interval_coverage,
+    non_finite_reason,
     stratified_folds,
 )
 from neurosim.recon.seeding import SAMPLING_STREAM, torch_generator
@@ -321,6 +322,10 @@ def scene_metrics(
     space, brain pixels). Screens: gauge-removed rms delay error [ns] of the CT
     and of the calibrated screen against `scene.screen_true`, and the rms error of
     their log amplitudes [Np].
+
+    A method whose images are not all finite for this scene is not scored: its
+    entry is ``{"failed": reason, "seconds": ...}`` (`recon.metrics.non_finite_reason`),
+    and `summarise` counts it.
     """
     metric_cfg = cfg.metrics
     labels = np.asarray(trials.label)
@@ -336,6 +341,10 @@ def scene_metrics(
     methods: dict[str, dict[str, float]] = {}
     for method in METHODS:
         series = outputs["images"][method]
+        failure = non_finite_reason({"images": series})
+        if failure is not None:
+            methods[method] = {"failed": failure, "seconds": outputs["seconds"][method]}
+            continue
         values = {
             "decoding_accuracy": decoding_accuracy(series, labels, folds, metric_cfg.n_components),
             "activation_dice": activation_dice(
@@ -405,21 +414,37 @@ def summarise(scenes: list[dict[str, Any]]) -> dict[str, dict[str, dict[str, flo
     """Mean and spread over scenes of every metric of every method.
 
     Returns ``{method: {metric: {"mean", "std", "n"}}}`` (std with ddof 1; 0 for one
-    scene), plus the pseudo-method ``"screens"`` for the screen errors.
+    scene), plus the pseudo-method ``"screens"`` for the screen errors. Scenes on
+    which a method failed (`scene_metrics`) are left out of that method's
+    statistics, so ``n`` is the number of scenes it was scored on; a method that
+    failed on every scene has ``seconds`` only.
     """
     summary: dict[str, dict[str, dict[str, float]]] = {}
     groups = {method: [scene["methods"][method] for scene in scenes] for method in METHODS}
     groups["screens"] = [scene["screens"] for scene in scenes]
     for name, records in groups.items():
         summary[name] = {}
-        for metric in records[0]:
-            values = np.array([record[metric] for record in records], dtype=np.float64)
+        metrics = dict.fromkeys(key for record in records for key in record if key != "failed")
+        for metric in metrics:
+            values = np.array(
+                [record[metric] for record in records if metric in record], dtype=np.float64
+            )
             summary[name][metric] = {
                 "mean": float(values.mean()),
                 "std": float(values.std(ddof=1)) if values.shape[0] > 1 else 0.0,
                 "n": int(values.shape[0]),
             }
     return summary
+
+
+def failures(scenes: list[dict[str, Any]]) -> list[str]:
+    """One line per (scene, method) that could not be scored, with the reason."""
+    return [
+        f"scene {scene['index']}, {method}: {record['failed']}"
+        for scene in scenes
+        for method, record in scene["methods"].items()
+        if "failed" in record
+    ]
 
 
 def markdown_table(summary: dict[str, dict[str, dict[str, float]]]) -> str:
@@ -462,7 +487,7 @@ def estimate_seconds(
     Returns seconds per stage (``factors``, ``calibration``, ``assembly``, ``dps``,
     ``prior_only``) summed over `n_scenes`, and their ``total``.
     """
-    reference = scene.bank_skull
+    reference = scene.bank_ct  # sizes only
     nf, n_elements = reference.freqs.shape[0], reference.transducer.n_elements
     n_pix = scene.pixel_grid.shape[0] * scene.pixel_grid.shape[1]
     calibration = cfg.calibration

@@ -78,6 +78,18 @@ field point, the width per unit take-off angle
 (from `x(p) = sum d_i tan(theta_i)` with `sin(theta_i) = p c_i`; indices e, r:
 element and field point). `integrate_paths` returns the integral and the two
 end cosines.
+
+Path-length histograms (optional, `PathBins`). Every node of the grid may carry
+weights on a few bins (for example the two neighbouring knots of its CT number,
+or of its lateral position). The tracer then also returns, per ray and bin,
+
+    bin_path[b] = integral of (bilinear interpolant of the node map W_b) ds
+
+with `W_b` the node weights on bin `b`, taken with the same midpoint samples as
+the travel time. For any node map that is a combination `sum_b v_b W_b` of the
+bins, its integral along the traced ray is `sum_b v_b bin_path[b]`: the path
+integral of a whole family of slowness or absorption maps from one trace (the
+first-order travel-time perturbation of Fermat's principle, with the ray fixed).
 """
 
 from __future__ import annotations
@@ -120,6 +132,34 @@ _TINY = 1.0e-300
 
 
 @dataclass(frozen=True)
+class PathBins:
+    """Sparse node weights of the path-length histograms (module docstring).
+
+    Node `n` (row-major index of the medium grid) contributes `weight[n, m]` to
+    bin `index[n, m]`, for each of its `m` entries; an entry with weight 0 is
+    skipped.
+
+    Attributes:
+        index: bin of every entry, int64, shape (nz * nx, n_entries), values in [0, n_bins).
+        weight: weight of every entry [dimensionless], float64, shape (nz * nx, n_entries).
+        n_bins: number of bins.
+    """
+
+    index: np.ndarray
+    weight: np.ndarray
+    n_bins: int
+
+    def __post_init__(self) -> None:
+        if self.index.shape != self.weight.shape or self.index.ndim != 2:
+            raise ValueError(
+                f"index {self.index.shape} and weight {self.weight.shape} must share one "
+                "shape (n_nodes, n_entries)"
+            )
+        if self.index.size and (self.index.min() < 0 or self.index.max() >= self.n_bins):
+            raise ValueError(f"bin indices must lie in [0, {self.n_bins})")
+
+
+@dataclass(frozen=True)
 class MediumMaps:
     """What the path integrals read from a plane medium.
 
@@ -131,12 +171,14 @@ class MediumMaps:
             (x, z) components of the unit layer normal (zero where the pixel has
             none), float64, shape (nz * nx, 4); read with nearest-neighbour lookup.
         max_sound_speed: highest sound speed of the medium [m/s].
+        bins: node weights of the path-length histograms, or None for none.
     """
 
     grid: Grid2D
     integrands: np.ndarray
     pixels: np.ndarray
     max_sound_speed: float
+    bins: PathBins | None = None
 
 
 def layer_normals(slowness: np.ndarray, spacing: float, scale: float) -> np.ndarray:
@@ -169,6 +211,7 @@ def medium_maps(
     density: np.ndarray,
     attenuation: np.ndarray,
     layer_normal_scale: float,
+    bins: PathBins | None = None,
 ) -> MediumMaps:
     """Prepare the lookup tables of a plane medium.
 
@@ -178,7 +221,14 @@ def medium_maps(
         density: [kg/m^3], shape (nz, nx).
         attenuation: alpha0 [dB/(cm MHz^y)], shape (nz, nx).
         layer_normal_scale: integration scale of the layer normals [m].
+        bins: node weights of the path-length histograms (one row per node of
+            `grid`, row-major), or None.
     """
+    if bins is not None and bins.index.shape[0] != grid.shape[0] * grid.shape[1]:
+        raise ValueError(
+            f"bins describe {bins.index.shape[0]} nodes, the grid has "
+            f"{grid.shape[0] * grid.shape[1]}"
+        )
     speed = sound_speed.astype(np.float64)
     slowness = 1.0 / speed
     normals = layer_normals(slowness, grid.spacing, layer_normal_scale)
@@ -186,7 +236,7 @@ def medium_maps(
         (np.stack((speed, density.astype(np.float64)), axis=-1), normals), axis=-1
     ).reshape(-1, 4)
     integrands = np.stack((slowness, attenuation.astype(np.float64)), axis=-1)
-    return MediumMaps(grid, integrands, pixels, float(speed.max()))
+    return MediumMaps(grid, integrands, pixels, float(speed.max()), bins)
 
 
 @dataclass(frozen=True)
@@ -210,6 +260,8 @@ class PathIntegrals:
         min_cosine: smallest cos(theta) along the ray.
         forced: True where the ray was sent straight to the source before it
             came within the capture radius.
+        bin_path: path-length histograms [m], float32, shape (n_sources, n_points,
+            n_bins) (module docstring); None when the maps carry no bins.
     """
 
     travel_time: np.ndarray
@@ -221,6 +273,7 @@ class PathIntegrals:
     end_cosines: np.ndarray
     min_cosine: np.ndarray
     forced: np.ndarray
+    bin_path: np.ndarray | None = None
 
 
 def _nearest_pixel(stencil: BilinearStencil) -> np.ndarray:
@@ -366,6 +419,65 @@ def _accumulate_sample(
     state.normal_transmission_squared *= at_normal
 
 
+# An entry column of `PathBins` in which more than this fraction of the nodes has a weight
+# is added for every ray; a sparser one only for the rays whose node has a weight.
+_DENSE_ENTRY_FRACTION = 0.5
+
+
+def _bin_columns(bins: PathBins) -> list[tuple[np.ndarray, np.ndarray, bool]]:
+    """Contiguous `(index, weight, dense)` columns of the entries of `bins`."""
+    return [
+        (
+            np.ascontiguousarray(bins.index[:, entry]),
+            np.ascontiguousarray(bins.weight[:, entry]),
+            bool(np.count_nonzero(bins.weight[:, entry]) > _DENSE_ENTRY_FRACTION * len(bins.index)),
+        )
+        for entry in range(bins.index.shape[1])
+    ]
+
+
+def _accumulate_bins(
+    histogram: np.ndarray,
+    n_bins: int,
+    ray: np.ndarray,
+    length: np.ndarray,
+    stencil: BilinearStencil,
+    columns: list[tuple[np.ndarray, np.ndarray, bool]],
+) -> None:
+    """Add one sample of every ray to its path-length histograms.
+
+    The bilinear interpolant of the node map of bin `b` at the sample is the sum
+    over the four corners of the cell of `corner weight * node weight on b`.
+
+    Args:
+        histogram: flat view of the (n_rays, n_bins) histograms [m], updated in place.
+        n_bins: number of bins.
+        ray: number of each ray of the working set, shape (n,).
+        length: path length the sample stands for [m], shape (n,).
+        stencil: bilinear stencil of the samples.
+        columns: node weights, from `_bin_columns`.
+    """
+    row = ray * n_bins
+    weight_z, weight_x = stencil.weight_z, stencil.weight_x
+    corners = (
+        (0, (1.0 - weight_z) * (1.0 - weight_x)),
+        (1, (1.0 - weight_z) * weight_x),
+        (stencil.row_stride, weight_z * (1.0 - weight_x)),
+        (stencil.row_stride + 1, weight_z * weight_x),
+    )
+    # Every statement below adds at most one value per ray, so its flat indices are unique.
+    for offset, corner_weight in corners:
+        node = stencil.corner + offset
+        share = length * corner_weight
+        for index, weight, dense in columns:
+            if dense:
+                histogram[row + index.take(node)] += share * weight.take(node)
+            else:
+                node_weight = weight.take(node)
+                used = np.flatnonzero(node_weight)
+                histogram[row[used] + index.take(node[used])] += share[used] * node_weight[used]
+
+
 def integrate_paths(
     field: EikonalField,
     maps: MediumMaps,
@@ -397,8 +509,11 @@ def integrate_paths(
     excess_gradient = np.stack((gradient_x, gradient_z), axis=-1)  # (nz, nx, n_sources, 2)
     del gradient_z, gradient_x
 
-    def read(source: np.ndarray, xz: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Unit vector along grad T, the bilinear integrands and the nearest pixel at points."""
+    def read(
+        source: np.ndarray, xz: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, BilinearStencil]:
+        """Unit vector along grad T, the bilinear integrands, the nearest pixel and the
+        bilinear stencil at points."""
         stencil = bilinear_stencil(grid, xz)
         gradient = gather_bilinear(excess_gradient, stencil, source)
         offset = xz - field.sources_xz[source]
@@ -409,11 +524,14 @@ def integrate_paths(
             gradient / norm[:, None],
             gather_bilinear(maps.integrands, stencil),
             maps.pixels.take(_nearest_pixel(stencil), axis=0),
+            stencil,
         )
 
     source = np.repeat(np.arange(n_sources), n_points)
     position = np.tile(np.asarray(points_xz, dtype=np.float64), (n_sources, 1))
-    direction, integrands, pixel = read(source, position)
+    direction, integrands, pixel, _ = read(source, position)
+    histogram = None if maps.bins is None else np.zeros(n_rays * maps.bins.n_bins)
+    bin_columns = [] if maps.bins is None else _bin_columns(maps.bins)
     longest_path = _PATH_LENGTH_MARGIN * maps.max_sound_speed * field.travel_time(source, position)
     # Slowness along the layers at the field point: sin(theta) / c where its pixel has a normal.
     sine = np.abs(direction[:, 0] * pixel[:, 3] - direction[:, 1] * pixel[:, 2])
@@ -475,7 +593,11 @@ def integrate_paths(
         towards = offset / np.maximum(distance, _TINY)[:, None]
         lead = np.where((homing & ~parked)[:, None], towards, state.direction)
         midpoint = np.clip(state.position - (0.5 * length)[:, None] * lead, lowest, highest)
-        along_gradient, integrands, pixel = read(state.source, midpoint)
+        along_gradient, integrands, pixel, stencil = read(state.source, midpoint)
+        if histogram is not None:
+            _accumulate_bins(
+                histogram, maps.bins.n_bins, state.ray, length, stencil, bin_columns
+            )
         state.direction = np.where(homing[:, None], lead, along_gradient)
         arrived = homing & (distance <= step)
         advanced = np.clip(state.position - length[:, None] * state.direction, lowest, highest)
@@ -506,4 +628,9 @@ def integrate_paths(
         end_cosines=(results["cosine_at_point"] * results["cosine_last"]).reshape(shape),
         min_cosine=results["min_cosine"].reshape(shape),
         forced=results["forced"].reshape(shape),
+        bin_path=(
+            None
+            if histogram is None
+            else histogram.reshape(*shape, maps.bins.n_bins).astype(np.float32)
+        ),
     )

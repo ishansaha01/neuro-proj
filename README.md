@@ -46,13 +46,20 @@ See **[ROADMAP.md](ROADMAP.md)** for the detailed plan, the design decisions and
 
 ## Status (17 Nov 2026)
 
-All three stages exist as working, tested code on the `build-out` branch. Stage 1 is the most thoroughly checked; stages 2 and 3 run end to end at laptop scale. The current state of every physics check is in **[evals/REGISTRY.md](evals/REGISTRY.md)** (generated; failing evals stay listed as failing), and every design choice and known limit is in **[ROADMAP.md](ROADMAP.md)**.
+All three stages exist as working, tested code on the `build-out` branch. The current state of every physics check is in **[evals/REGISTRY.md](evals/REGISTRY.md)** (generated; failing evals stay listed as failing), and every design choice and known limit is in **[ROADMAP.md](ROADMAP.md)**.
+
+What the simulator says so far (8 simulated scenes, 120 images each):
+
+- **The skull is the problem it is supposed to be.** Without correction the image has almost no relation to the true blood-volume map (correlation 0.07, against 0.90 with no skull).
+- **A CT-derived skull model helps, and calibrating it against the ultrasound data helps more.** Beamforming with CT-derived delays gives 0.44; after calibrating the CT model by re-beamforming, 0.61; with the true delays, 0.72. Inverting on top (deconvolution or diffusion posterior sampling) adds a few points to each.
+- **The functional signal is not recovered by anything yet, not even without a skull.** With realistic speckle one image is close to a single speckle look, and decoding is at chance for every method. This is the most important open problem.
 
 Things to know before trusting a number:
 
-- **Full-wave simulation at full resolution is not a laptop job** (about 300 core-hours for 128 elements at 2 MHz). The fast `ray` backend (delay, absorption and interface loss; no refraction, no reverberation) produces the data; k-Wave is the small-scale reference it is checked against.
-- **Several material constants and defaults are marked `assumed, to verify`** in the configs, and decisions D-011 and D-014 in the ROADMAP need the team's confirmation.
-- **The diffusion prior is small and trained only on this simulator's procedural CBV maps.** Read the reconstruction results with that in mind.
+- **The calibration is not yet safe.** Its focus criterion is a brightness, and on scenes built to test it, it is not maximised by the true skull model (E-RECON-013 and 014 fail).
+- **Data come from a refraction-aware ray model (`bent_ray`), not full-wave simulation**, which at full resolution is not a laptop job (about 300 core-hours). It keeps only the first arrival: no reverberation.
+- **Several constants and defaults are marked `assumed, to verify`**, and decisions D-011, D-014 and D-017 in the ROADMAP need the team's confirmation. The noise level (D-017) in particular decides whether there is any signal to work with.
+- **The diffusion prior is small and trained only on this simulator's procedural CBV maps.**
 
 ## Getting started
 
@@ -90,10 +97,11 @@ A paired dataset, the prior and the reconstruction experiment:
 python scripts/make_dataset.py --config configs/sweep_demo.yaml --seed 0 --out outputs/demo_sweep
 python scripts/make_prior_dataset.py --config configs/prior_default.yaml --seed 0 --out outputs/prior/dataset.h5
 python scripts/train_prior.py --config configs/prior_default.yaml --data outputs/prior/dataset.h5 --seed 0 --out outputs/prior/prior.pt
-python scripts/run_experiment.py --dataset outputs/demo_sweep --prior outputs/prior/prior.pt --config configs/recon_default.yaml --seed 0 --out outputs/experiment
+python scripts/run_experiment.py --dataset outputs/demo_sweep --prior outputs/prior/prior.pt --config configs/recon_default.yaml --seed 0 --out outputs/experiment_v2
+python scripts/plot_experiment.py --results outputs/experiment_v2 --out outputs/experiment_v2/figure.png
 ```
 
-Single parts can be run alone: `scripts/generate_head.py`, `scripts/plot_head.py`, `scripts/run_ct.py`, `scripts/compute_bank.py`, `scripts/run_fus.py`. `outputs/` is git-ignored.
+`run_experiment.py` runs the current design (CT skull model calibrated by re-beamforming); add `--design screen` for the first design (per-element phase screen), kept for comparison. Single parts can be run alone: `scripts/generate_head.py`, `scripts/plot_head.py`, `scripts/run_ct.py`, `scripts/compute_bank.py`, `scripts/run_fus.py`. `outputs/` is git-ignored.
 
 ## Repository layout
 

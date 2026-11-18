@@ -140,7 +140,7 @@ def reference_bank(scene: Scene) -> GreensBank:
     cells: 2 x 2 nodes spanning the pixel grid (a bank on the scene's ROI grid
     would hold nf * n_elements * n_roi ones).
     """
-    reference = scene.bank_skull
+    reference = scene.bank_ct  # for the array, the frequency grid and the reference speed
     nz, nx = scene.pixel_grid.shape
     roi = Grid2D(
         shape=(2, 2),

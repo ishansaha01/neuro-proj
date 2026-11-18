@@ -358,7 +358,11 @@ def calibrate_screen(
         fits.append(deviance_per_pixel(samples, operator[0]))
         if candidate == 0:
             start_fit = deviance_per_pixel(samples, full_operator(screen_tensors(start)))
-    selected = int(np.argmin(fits))
+    # A candidate whose screen update diverged (the line search of an amplitude update can
+    # overflow the float32 operator) has a non-finite fit. `np.argmin` would select it; it is
+    # skipped instead. If every candidate diverged the first is returned, non-finite, and
+    # the caller has to treat the calibration as failed.
+    selected = int(np.nanargmin(fits)) if np.isfinite(fits).any() else 0
     return CalibrationResult(
         screen=candidates[selected],
         candidates=tuple(candidates),
