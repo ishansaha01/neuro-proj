@@ -46,7 +46,7 @@ See **[ROADMAP.md](ROADMAP.md)** for the detailed plan, the design decisions and
 
 ## Status (17 Nov 2026)
 
-All three stages exist as working, tested code on the `build-out` branch. The current state of every physics check is in **[evals/REGISTRY.md](evals/REGISTRY.md)** (generated; failing evals stay listed as failing), and every design choice and known limit is in **[ROADMAP.md](ROADMAP.md)**.
+All three stages exist as working, tested code on the `build-out` branch. **Figures, result tables and a summary written for the write-up are in [results/](results/README.md).** The current state of every physics check is in **[evals/REGISTRY.md](evals/REGISTRY.md)** (generated; failing evals stay listed as failing), and every design choice and known limit is in **[ROADMAP.md](ROADMAP.md)**.
 
 What the simulator says so far (8 simulated scenes, 120 images each):
 
@@ -87,7 +87,7 @@ python scripts/build_registry.py
 One reproducible run: head, both ultrasound runs (with and without skull), CT and the CT-derived skull, from one config and one seed. Every script prints a cost estimate before it starts.
 
 ```
-python scripts/run_pipeline.py --config configs/run_demo.yaml --seed 0 --out outputs/demo/run.h5
+python scripts/run_pipeline.py --config configs/run_demo.yaml --seed 0 --out outputs/demo/run.h5 --save-media
 python scripts/plot_run.py --run outputs/demo/run.h5 --out outputs/demo/run.png
 ```
 
@@ -122,6 +122,7 @@ neuro-proj/
 │   ├── data/               pipeline, CT-derived skull prior, sweeps, dataset format
 │   └── recon/              diffusion prior, baselines, posterior sampling, calibration, metrics
 ├── scripts/                command-line entry points
+├── results/                figures, result tables, trained prior and a summary for the write-up
 ├── tests/unit/             code checks (fast)
 └── evals/                  physics checks, one claim each; REGISTRY.md is generated
 ```
